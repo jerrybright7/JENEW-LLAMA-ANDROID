@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -28,7 +28,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build
+          sudo apt-get install -y cmake ninja-build zip
 
       - name: Compile ARM64 shared libraries
         run: |
@@ -66,9 +66,27 @@ jobs:
           echo "Built Android ARM64 libraries:"
           ls -lh output/
 
-      - name: Upload ARM64 libraries
+          cd output
+          zip -9 -j ../JENEW-LLAMA-ARM64.zip ./*
+
+      - name: Upload ARM64 libraries as workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: JENEW-LLAMA-ARM64
-          path: llama.cpp/output/
+          path: |
+            llama.cpp/output/
+            llama.cpp/JENEW-LLAMA-ARM64.zip
           if-no-files-found: error
+
+      - name: Publish downloadable ARM64 package
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: llama-android-arm64
+          name: JENEW llama.cpp Android ARM64
+          body: |
+            Prebuilt llama.cpp shared libraries for Android arm64-v8a.
+            Minimum Android API: 28.
+            Includes libllama.so and its ggml shared-library dependencies.
+          files: llama.cpp/JENEW-LLAMA-ARM64.zip
+          overwrite_files: true
+          make_latest: false
