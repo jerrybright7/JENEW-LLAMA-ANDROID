@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <stdexcept>
 #include <vector>
 
 #define LOG_TAG "JENEW-LLAMA"
