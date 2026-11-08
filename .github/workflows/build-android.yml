@@ -2,6 +2,9 @@ name: JENEW llama.cpp ARM64 + JNI Build
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - jenew-jni-bridge
 
 permissions:
   contents: write
