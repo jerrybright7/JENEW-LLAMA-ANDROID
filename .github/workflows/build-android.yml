@@ -54,8 +54,13 @@ jobs:
           cmake --build build-android --config Release --parallel 2
 
           mkdir -p output
-          find build-android/bin -maxdepth 1 -type f -name '*.so' -exec cp {} output/ ;
-          test -n "$(find output -maxdepth 1 -type f -name '*.so' -print -quit)"
+          shopt -s nullglob
+          libs=(build-android/bin/*.so)
+          if (( ${#libs[@]} == 0 )); then
+            echo "ERROR: No shared libraries were produced in build-android/bin"
+            exit 1
+          fi
+          cp "${libs[@]}" output/
           cp LICENSE output/
 
           echo "Built Android ARM64 libraries:"
