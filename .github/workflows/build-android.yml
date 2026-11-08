@@ -30,27 +30,36 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build
 
-      - name: Compile ARM64
+      - name: Compile ARM64 shared libraries
         run: |
           cd llama.cpp
 
-          cmake -B build-android \
+          cmake -S . -B build-android \
             -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-28 \
-            -DGGML_OPENMP=OFF \
+            -DBUILD_SHARED_LIBS=ON \
             -DGGML_NATIVE=OFF \
+            -DGGML_OPENMP=OFF \
+            -DLLAMA_BUILD_COMMON=OFF \
             -DLLAMA_BUILD_TESTS=OFF \
             -DLLAMA_BUILD_EXAMPLES=OFF \
             -DLLAMA_BUILD_TOOLS=OFF \
-            -DLLAMA_BUILD_SERVER=OFF
+            -DLLAMA_BUILD_SERVER=OFF \
+            -DLLAMA_BUILD_APP=OFF \
+            -DLLAMA_BUILD_UI=OFF
 
           cmake --build build-android --config Release --parallel 2
 
           mkdir -p output
-          find build-android -name '*.so' -exec cp {} output/ \;
+          find build-android/bin -maxdepth 1 -type f -name '*.so' -exec cp {} output/ ;
+          test -n "$(find output -maxdepth 1 -type f -name '*.so' -print -quit)"
           cp LICENSE output/
+
+          echo "Built Android ARM64 libraries:"
+          ls -lh output/
 
       - name: Upload ARM64 libraries
         uses: actions/upload-artifact@v4
