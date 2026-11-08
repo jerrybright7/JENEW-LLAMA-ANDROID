@@ -1,4 +1,4 @@
-name: JENEW llama.cpp ARM64 Build
+name: JENEW llama.cpp ARM64 + JNI Build
 
 on:
   workflow_dispatch:
@@ -11,11 +11,17 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout llama.cpp
+      - name: Checkout JENEW native bridge
+        uses: actions/checkout@v4
+        with:
+          ref: jenew-jni-bridge
+          path: jenew-native
+
+      - name: Checkout pinned llama.cpp source
         uses: actions/checkout@v4
         with:
           repository: ggml-org/llama.cpp
-          ref: master
+          ref: 7d7f0287530bc8981690f361d8c1627dbae1c99a
           path: llama.cpp
 
       - name: Install Android NDK
@@ -30,16 +36,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build zip
 
-      - name: Compile ARM64 shared libraries
+      - name: Build llama.cpp ARM64 shared libraries
         run: |
-          cd llama.cpp
-
-          cmake -S . -B build-android \
+          cmake -S llama.cpp -B llama.cpp/build-android \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-28 \
+            -DANDROID_STL=c++_shared \
             -DBUILD_SHARED_LIBS=ON \
             -DGGML_NATIVE=OFF \
             -DGGML_OPENMP=OFF \
@@ -51,42 +56,81 @@ jobs:
             -DLLAMA_BUILD_APP=OFF \
             -DLLAMA_BUILD_UI=OFF
 
-          cmake --build build-android --config Release --parallel 2
+          cmake --build llama.cpp/build-android --config Release --parallel 2
 
-          mkdir -p output
-          shopt -s nullglob
-          libs=(build-android/bin/*.so)
-          if (( ${#libs[@]} == 0 )); then
-            echo "ERROR: No shared libraries were produced in build-android/bin"
-            exit 1
-          fi
-          cp "${libs[@]}" output/
-          cp LICENSE output/
+          for lib in libggml-base.so libggml-cpu.so libggml.so libllama.so; do
+            test -f "llama.cpp/build-android/bin/$lib" || {
+              echo "Missing expected llama.cpp library: $lib"
+              exit 1
+            }
+          done
 
-          echo "Built Android ARM64 libraries:"
-          ls -lh output/
+      - name: Build JENEW JNI bridge
+        run: |
+          cmake -S jenew-native/jni -B jenew-native/build-jni \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-28 \
+            -DANDROID_STL=c++_shared \
+            -DLLAMA_CPP_ROOT="$GITHUB_WORKSPACE/llama.cpp" \
+            -DLLAMA_LIB_DIR="$GITHUB_WORKSPACE/llama.cpp/build-android/bin"
 
-          cd output
-          zip -9 -j ../JENEW-LLAMA-ARM64.zip ./*
+          cmake --build jenew-native/build-jni --config Release --parallel 2
 
-      - name: Upload ARM64 libraries as workflow artifact
+          test -f jenew-native/build-jni/libjenewllama.so
+
+      - name: Assemble verified ARM64 runtime package
+        run: |
+          mkdir -p package/arm64-v8a
+          cp llama.cpp/build-android/bin/libggml-base.so package/arm64-v8a/
+          cp llama.cpp/build-android/bin/libggml-cpu.so package/arm64-v8a/
+          cp llama.cpp/build-android/bin/libggml.so package/arm64-v8a/
+          cp llama.cpp/build-android/bin/libllama.so package/arm64-v8a/
+          cp jenew-native/build-jni/libjenewllama.so package/arm64-v8a/
+
+          CXX_RUNTIME="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+          test -f "$CXX_RUNTIME"
+          cp "$CXX_RUNTIME" package/arm64-v8a/
+
+          cp llama.cpp/LICENSE package/LICENSE
+          cat > package/README.txt <<'EOF'
+          JENEW llama.cpp Android ARM64 runtime
+          ABI: arm64-v8a
+          Minimum Android API: 28
+          llama.cpp source commit: 7d7f0287530bc8981690f361d8c1627dbae1c99a
+          Includes llama.cpp, ggml dependencies, JENEW JNI bridge and libc++_shared.
+          Install all .so files into app/src/main/jniLibs/arm64-v8a/.
+          Load libraries in this order: ggml-base, ggml-cpu, ggml, llama, jenewllama.
+          Keep libc++_shared.so packaged; it is a native runtime dependency.
+          EOF
+
+          echo "Runtime libraries:"
+          ls -lh package/arm64-v8a/
+
+          cd package
+          zip -9 -r ../JENEW-LLAMA-ARM64-JNI.zip .
+
+      - name: Upload ARM64 runtime artifact
         uses: actions/upload-artifact@v4
         with:
-          name: JENEW-LLAMA-ARM64
+          name: JENEW-LLAMA-ARM64-JNI
           path: |
-            llama.cpp/output/
-            llama.cpp/JENEW-LLAMA-ARM64.zip
+            package/
+            JENEW-LLAMA-ARM64-JNI.zip
           if-no-files-found: error
 
       - name: Publish downloadable ARM64 package
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: llama-android-arm64
-          name: JENEW llama.cpp Android ARM64
+          tag_name: llama-android-arm64-jni
+          name: JENEW llama.cpp Android ARM64 + JNI
           body: |
-            Prebuilt llama.cpp shared libraries for Android arm64-v8a.
+            Reproducible Android ARM64 runtime built from pinned llama.cpp commit.
+            Includes four llama.cpp/ggml libraries, the JENEW JNI bridge and libc++_shared.
             Minimum Android API: 28.
-            Includes libllama.so and its ggml shared-library dependencies.
-          files: llama.cpp/JENEW-LLAMA-ARM64.zip
+            Install all native libraries under app/src/main/jniLibs/arm64-v8a/.
+          files: JENEW-LLAMA-ARM64-JNI.zip
           overwrite_files: true
           make_latest: false
