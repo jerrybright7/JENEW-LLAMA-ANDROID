@@ -30,12 +30,12 @@ std::vector<llama_token> tokenize(const llama_vocab * vocab, const std::string &
     int32_t capacity = std::max<int32_t>(256, static_cast<int32_t>(text.size()) + 16);
     std::vector<llama_token> tokens(static_cast<size_t>(capacity));
     int32_t count = llama_tokenize(vocab, text.c_str(),
-            static_cast<int32_t>(text.size()), tokens.data(), capacity, true, false);
+            static_cast<int32_t>(text.size()), tokens.data(), capacity, true, true);
     if (count < 0) {
         capacity = -count;
         tokens.resize(static_cast<size_t>(capacity));
         count = llama_tokenize(vocab, text.c_str(),
-                static_cast<int32_t>(text.size()), tokens.data(), capacity, true, false);
+                static_cast<int32_t>(text.size()), tokens.data(), capacity, true, true);
     }
     if (count < 0) throw std::runtime_error("Prompt tokenization failed.");
     tokens.resize(static_cast<size_t>(count));
