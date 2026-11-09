@@ -24,13 +24,16 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: zrok-mobile/go.mod
-          cache-dependency-path: zrok-mobile/go.sum
+          cache-dependency-path: zrok-mobile/go.mod
       - name: Verify required secrets are configured
         shell: bash
         run: |
           test -n "$ZROK_LIVE_API_ENDPOINT" || { echo "Missing repository secret ZROK_LIVE_API_ENDPOINT"; exit 1; }
           test -n "$ZROK_LIVE_ACCOUNT_TOKEN" || { echo "Missing repository secret ZROK_LIVE_ACCOUNT_TOKEN"; exit 1; }
           test -n "$ZROK_LIVE_HOST" || { echo "Missing repository secret ZROK_LIVE_HOST"; exit 1; }
+      - name: Resolve Go module checksums
+        working-directory: zrok-mobile
+        run: go mod tidy
       - name: Run authenticated live multi-service test
         working-directory: zrok-mobile
         run: go test -v -count=1 ./bridge -run '^TestLiveZrokMultiServiceRoundTrip$'
