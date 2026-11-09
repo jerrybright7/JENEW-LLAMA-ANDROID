@@ -399,6 +399,7 @@ func Status() string {
 		"identitySaved":    false,
 		"activeForwarders": len(forwarders),
 		"activeBackends": ActiveBackendCount(),
+		"activeAccessForwarders": ActiveAccessForwarderCount(),
 		"managedShares":    len(managedShares),
 	}
 	if root != nil {
