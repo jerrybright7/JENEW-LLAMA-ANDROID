@@ -36,18 +36,18 @@ public final class MainActivity extends Activity {
 
             String status = bridge.Bridge.status();
             if (status == null
-                    || !status.contains("\\\"initialized\\\":true")
-                    || !status.contains("\\\"enabled\\\":false")) {
+                    || !status.contains("\"initialized\":true")
+                    || !status.contains("\"enabled\":false")) {
                 throw new IllegalStateException("Unexpected initialized status: " + status);
             }
 
-            String result = probe + "\\n" + status;
+            String result = probe + "\n" + status;
             Log.i(TAG, "ZROK_SMOKE_PASS: " + result);
-            resultView.setText("PASS\\n\\n" + result
-                    + "\\n\\nGo JNI loaded, app-private root initialized, and status returned.");
+            resultView.setText("PASS\n\n" + result
+                    + "\n\nGo JNI loaded, app-private root initialized, and status returned.");
         } catch (Throwable error) {
             Log.e(TAG, "ZROK_SMOKE_FAIL", error);
-            resultView.setText("FAIL\\n\\n" + error.getClass().getName() + ": " + error.getMessage());
+            resultView.setText("FAIL\n\n" + error.getClass().getName() + ": " + error.getMessage());
         }
     }
 }
