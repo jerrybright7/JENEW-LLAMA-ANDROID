@@ -32,7 +32,7 @@ public final class MainActivity extends Activity {
     private LinearLayout rootLayout;
     private TextView statusView, messageView;
     private LinearLayout servicesContainer;
-    private EditText endpointInput, tokenInput, hostInput, targetInput, advancedOptionsInput, accessShareInput, accessTokenInput, accessBindInput, driveShareInput, driveRemoteInput, driveLocalInput, driveDestinationInput;
+    private EditText endpointInput, tokenInput, hostInput, targetInput, advancedOptionsInput, accessShareInput, accessTokenInput, accessBindInput, driveShareInput, driveRemoteInput, driveLocalInput, driveDestinationInput, namespaceInput, metricsShareInput, metricsDurationInput;
     private Spinner backendInput, modeInput;
     private static final String DEFAULT_API = "https://api-v2.zrok.io";
     private static final String[] BACKENDS = {
@@ -198,6 +198,21 @@ public final class MainActivity extends Activity {
                 return null;
             });
         });
+
+        addSection("NAMESPACES, RESERVED NAMES & METRICS");
+        addButton("LIST AVAILABLE NAMESPACES", () -> runTaskWithResult("Loading namespaces…",
+            () -> bridge.Bridge.listShareNamespaces()));
+        namespaceInput = addInput("Namespace token", "", false);
+        addButton("LIST NAMES IN NAMESPACE", () -> runTaskWithResult("Loading reserved names…",
+            () -> bridge.Bridge.listNamesForNamespace(value(namespaceInput))));
+        addButton("LIST ALL NAMED SHARES", () -> runTaskWithResult("Loading named shares…",
+            () -> bridge.Bridge.listAllNames()));
+        metricsDurationInput = addInput("Metrics duration (e.g. 24h, 7d)", "24h", false);
+        addButton("GET ACCOUNT METRICS", () -> runTaskWithResult("Loading account usage metrics…",
+            () -> bridge.Bridge.getAccountMetrics(value(metricsDurationInput))));
+        metricsShareInput = addInput("Share token for metrics", "", false);
+        addButton("GET SHARE METRICS", () -> runTaskWithResult("Loading share metrics…",
+            () -> bridge.Bridge.getShareMetrics(value(metricsShareInput), value(metricsDurationInput))));
 
         addSection("MANAGED SERVICES");
         addButton("REFRESH STATUS + SERVICES", this::refresh);
