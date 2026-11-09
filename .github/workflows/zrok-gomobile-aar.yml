@@ -82,7 +82,7 @@ jobs:
           go mod tidy
           go list -deps ./...
           mkdir -p ../output
-          gomobile bind -v -target=android/arm64 -androidapi 23 -trimpath -ldflags="-s -w" -o ../output/jenew-zrok-sdk.aar ./bridge
+          gomobile bind -v -target=android -androidapi 23 -trimpath -ldflags="-s -w" -o ../output/jenew-zrok-sdk.aar ./bridge
           test -s ../output/jenew-zrok-sdk.aar
           unzip -l ../output/jenew-zrok-sdk.aar
           unzip -p ../output/jenew-zrok-sdk.aar AndroidManifest.xml >/dev/null
