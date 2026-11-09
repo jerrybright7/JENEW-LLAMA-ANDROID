@@ -208,7 +208,7 @@ func Initialize(privateAppDirectory string) error {
 	}
 	privateAppDirectory = filepath.Clean(privateAppDirectory)
 	if root != nil && root.Metadata() != nil {
-		if root.Metadata().RootPath != privateAppDirectory && len(forwarders) > 0 {
+		if root.Metadata().RootPath != privateAppDirectory && (len(forwarders) > 0 || ActiveBackendCount() > 0) {
 			return errors.New("cannot switch zrok storage roots while TCP forwarders are active")
 		}
 		if root.Metadata().RootPath == privateAppDirectory && len(forwarders) > 0 {
@@ -340,7 +340,7 @@ func DisableEnvironment() error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if err := validateDisablePreconditions(root != nil && root.IsEnabled(), len(forwarders)); err != nil {
+	if err := validateDisablePreconditions(root != nil && root.IsEnabled(), len(forwarders)+ActiveBackendCount()); err != nil {
 		return err
 	}
 
@@ -398,6 +398,7 @@ func Status() string {
 		"enabled":          false,
 		"identitySaved":    false,
 		"activeForwarders": len(forwarders),
+		"activeBackends": ActiveBackendCount(),
 		"managedShares":    len(managedShares),
 	}
 	if root != nil {
@@ -604,6 +605,9 @@ func DeleteShare(shareToken string) error {
 	if _, active := forwarders[shareToken]; active {
 		return errors.New("stop the TCP forwarder before deleting its share")
 	}
+	if backendIsRunning(shareToken) {
+		return errors.New("stop the backend engine before deleting its share")
+	}
 	if err := sdk.DeleteShare(root, &sdk.Share{Token: shareToken}); err != nil {
 		return fmt.Errorf("delete zrok share: %w", err)
 	}
@@ -618,15 +622,6 @@ func buildShareRequest(backendMode, shareMode, target string) (*sdk.ShareRequest
 	backendMode = strings.TrimSpace(backendMode)
 	shareMode = strings.TrimSpace(shareMode)
 	target = strings.TrimSpace(target)
-	if target == "" {
-		return nil, errors.New("share target is required")
-	}
-	if backendMode == string(sdk.TcpTunnelBackendMode) {
-		if err := validateTCPAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid TCP tunnel target: %w", err)
-		}
-	}
-
 	backend := sdk.BackendMode(backendMode)
 	switch backend {
 	case sdk.ProxyBackendMode, sdk.WebBackendMode, sdk.TcpTunnelBackendMode,
@@ -635,17 +630,28 @@ func buildShareRequest(backendMode, shareMode, target string) (*sdk.ShareRequest
 	default:
 		return nil, fmt.Errorf("unsupported zrok backend mode %q", backendMode)
 	}
-
+	switch backend {
+	case sdk.TcpTunnelBackendMode, sdk.UdpTunnelBackendMode:
+		if err := validateTCPAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid %s target: %w", backendMode, err)
+		}
+	case sdk.ProxyBackendMode:
+		parsed, err := url.ParseRequestURI(target)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return nil, errors.New("proxy target must be an absolute http:// or https:// URL")
+		}
+	case sdk.WebBackendMode, sdk.DriveBackendMode, sdk.CaddyBackendMode:
+		if target == "" {
+			return nil, fmt.Errorf("%s target path is required", backendMode)
+		}
+	case sdk.SocksBackendMode:
+		// SOCKS is a network proxy and does not require a local target.
+	}
 	mode := sdk.ShareMode(shareMode)
 	if mode != sdk.PublicShareMode && mode != sdk.PrivateShareMode {
 		return nil, fmt.Errorf("unsupported zrok share mode %q", shareMode)
 	}
-
-	return &sdk.ShareRequest{
-		BackendMode: backend,
-		ShareMode:   mode,
-		Target:      target,
-	}, nil
+	return &sdk.ShareRequest{BackendMode: backend, ShareMode: mode, Target: target}, nil
 }
 
 func validateAPIEndpoint(endpoint string) error {
