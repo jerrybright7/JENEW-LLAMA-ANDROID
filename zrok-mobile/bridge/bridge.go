@@ -20,10 +20,55 @@ import (
 )
 
 var (
-	mu         sync.Mutex
-	root       *env_v0_4.Root
-	forwarders = map[string]*tcpForwarder{}
+	mu                sync.Mutex
+	root              *env_v0_4.Root
+	forwarders        = map[string]*tcpForwarder{}
+	managedShares     = map[string]managedShare{}
+	shareRegistryPath string
 )
+
+type managedShare struct {
+	ShareToken       string   `json:"shareToken"`
+	BackendMode      string   `json:"backendMode"`
+	ShareMode        string   `json:"shareMode"`
+	Target           string   `json:"target"`
+	FrontendEndpoints []string `json:"frontendEndpoints,omitempty"`
+	Running          bool     `json:"running"`
+	CreatedAt        string   `json:"createdAt"`
+}
+
+func persistManagedSharesLocked() error {
+	if shareRegistryPath == "" {
+		return errors.New("zrok share registry is not initialized")
+	}
+	data, err := json.Marshal(managedShares)
+	if err != nil {
+		return fmt.Errorf("encode zrok share registry: %w", err)
+	}
+	tmp := shareRegistryPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return fmt.Errorf("write zrok share registry: %w", err)
+	}
+	if err := os.Chmod(tmp, 0600); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("secure zrok share registry: %w", err)
+	}
+	if err := os.Rename(tmp, shareRegistryPath); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("commit zrok share registry: %w", err)
+	}
+	return nil
+}
+
+func setManagedShareRunningLocked(token string, running bool) {
+	share, exists := managedShares[token]
+	if !exists || share.Running == running {
+		return
+	}
+	share.Running = running
+	managedShares[token] = share
+	_ = persistManagedSharesLocked()
+}
 
 type tcpForwarder struct {
 	listener net.Listener
@@ -77,6 +122,7 @@ func (f *tcpForwarder) acceptLoop(localAddress, shareToken string) {
 		if forwarders[shareToken] == f {
 			delete(forwarders, shareToken)
 		}
+		setManagedShareRunningLocked(shareToken, false)
 		mu.Unlock()
 	}()
 
@@ -159,8 +205,13 @@ func Initialize(privateAppDirectory string) error {
 		return errors.New("zrok root must be a non-empty absolute app-private path")
 	}
 	privateAppDirectory = filepath.Clean(privateAppDirectory)
-	if root != nil && root.Metadata() != nil && root.Metadata().RootPath != privateAppDirectory && len(forwarders) > 0 {
-		return errors.New("cannot switch zrok storage roots while TCP forwarders are active")
+	if root != nil && root.Metadata() != nil {
+		if root.Metadata().RootPath != privateAppDirectory && len(forwarders) > 0 {
+			return errors.New("cannot switch zrok storage roots while TCP forwarders are active")
+		}
+		if root.Metadata().RootPath == privateAppDirectory && len(forwarders) > 0 {
+			return nil
+		}
 	}
 	if err := os.MkdirAll(privateAppDirectory, 0700); err != nil {
 		return fmt.Errorf("create private zrok directory: %w", err)
@@ -177,6 +228,29 @@ func Initialize(privateAppDirectory string) error {
 		return fmt.Errorf("load zrok environment: %w", err)
 	}
 	root = loaded
+	shareRegistryPath = filepath.Join(privateAppDirectory, "managed-shares.json")
+	managedShares = map[string]managedShare{}
+	registryData, readErr := os.ReadFile(shareRegistryPath)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return fmt.Errorf("read zrok share registry: %w", readErr)
+	}
+	if readErr == nil {
+		if err := json.Unmarshal(registryData, &managedShares); err != nil {
+			return fmt.Errorf("decode zrok share registry: %w", err)
+		}
+	}
+	if managedShares == nil {
+		managedShares = map[string]managedShare{}
+	}
+	// Process restarts close listeners. Retain service definitions, but only
+	// report a service running after its forwarder has been recreated.
+	for token, share := range managedShares {
+		share.Running = false
+		managedShares[token] = share
+	}
+	if err := persistManagedSharesLocked(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -283,6 +357,12 @@ func DisableEnvironment() error {
 	if err := root.DeleteEnvironment(); err != nil {
 		return fmt.Errorf("remove local zrok credentials after remote disable: %w", err)
 	}
+	managedShares = map[string]managedShare{}
+	if shareRegistryPath != "" {
+		if err := os.Remove(shareRegistryPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove local zrok share registry: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -307,6 +387,7 @@ func Status() string {
 		"enabled":          false,
 		"identitySaved":    false,
 		"activeForwarders": len(forwarders),
+		"managedShares":    len(managedShares),
 	}
 	if root != nil {
 		state["enabled"] = root.IsEnabled()
@@ -352,7 +433,34 @@ func CreateShare(backendMode, shareMode, target string) (string, error) {
 		_ = sdk.DeleteShare(root, created)
 		return "", fmt.Errorf("encode created share: %w", err)
 	}
+	managedShares[created.Token] = managedShare{
+		ShareToken: created.Token, BackendMode: strings.TrimSpace(backendMode),
+		ShareMode: strings.TrimSpace(shareMode), Target: strings.TrimSpace(target),
+		FrontendEndpoints: created.FrontendEndpoints,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := persistManagedSharesLocked(); err != nil {
+		delete(managedShares, created.Token)
+		_ = sdk.DeleteShare(root, created)
+		return "", err
+	}
 	return string(encoded), nil
+}
+
+// ListManagedShares returns locally managed services as JSON. Share tokens are
+// included for bridge operations; callers must keep this response private.
+func ListManagedShares() string {
+	mu.Lock()
+	defer mu.Unlock()
+	shares := make([]managedShare, 0, len(managedShares))
+	for _, share := range managedShares {
+		shares = append(shares, share)
+	}
+	encoded, err := json.Marshal(shares)
+	if err != nil {
+		return "[]"
+	}
+	return string(encoded)
 }
 
 
@@ -388,6 +496,13 @@ func StartTCPForwarder(shareToken, localAddress string) error {
 		conns:    make(map[net.Conn]struct{}),
 	}
 	forwarders[shareToken] = forwarder
+	setManagedShareRunningLocked(shareToken, true)
+	if err := persistManagedSharesLocked(); err != nil {
+		delete(forwarders, shareToken)
+		setManagedShareRunningLocked(shareToken, false)
+		_ = forwarder.close()
+		return err
+	}
 	go forwarder.acceptLoop(localAddress, shareToken)
 	return nil
 }
@@ -408,7 +523,15 @@ func StopTCPForwarder(shareToken string) error {
 	if !exists {
 		return errors.New("no TCP forwarder is running for this share")
 	}
-	return forwarder.close()
+	err := forwarder.close()
+	mu.Lock()
+	setManagedShareRunningLocked(shareToken, false)
+	persistErr := persistManagedSharesLocked()
+	mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return persistErr
 }
 
 // DeleteShare removes a previously-created share by its share token.
@@ -428,6 +551,10 @@ func DeleteShare(shareToken string) error {
 	}
 	if err := sdk.DeleteShare(root, &sdk.Share{Token: shareToken}); err != nil {
 		return fmt.Errorf("delete zrok share: %w", err)
+	}
+	delete(managedShares, shareToken)
+	if err := persistManagedSharesLocked(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -484,6 +611,7 @@ func SDKCompileProbe() string {
 	_ = sdk.DeleteShare
 	_ = sdk.NewListener
 	_ = sdk.NewDialer
+	_ = ListManagedShares
 	request, _ := buildShareRequest(
 		string(sdk.TcpTunnelBackendMode),
 		string(sdk.PublicShareMode),

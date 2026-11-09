@@ -1,6 +1,9 @@
 package bridge
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/openziti/zrok/v2/sdk/golang/sdk"
@@ -106,5 +109,65 @@ func TestValidateDisablePreconditions(t *testing.T) {
 				t.Fatalf("error = %v, wantError = %v", err, tc.wantError)
 			}
 		})
+	}
+}
+
+func TestManagedShareRegistryPersistsMultipleServices(t *testing.T) {
+	previousPath := shareRegistryPath
+	previousShares := managedShares
+	shareRegistryPath = filepath.Join(t.TempDir(), "managed-shares.json")
+	managedShares = map[string]managedShare{
+		"token-ssh": {
+			ShareToken: "token-ssh", BackendMode: "tcpTunnel", ShareMode: "private",
+			Target: "127.0.0.1:22", FrontendEndpoints: []string{"ssh.example.test"}, Running: true,
+		},
+		"token-web": {
+			ShareToken: "token-web", BackendMode: "web", ShareMode: "public",
+			Target: "http://127.0.0.1:8080", FrontendEndpoints: []string{"web.example.test"},
+		},
+	}
+	defer func() {
+		shareRegistryPath = previousPath
+		managedShares = previousShares
+	}()
+
+	if err := persistManagedSharesLocked(); err != nil {
+		t.Fatalf("persist registry: %v", err)
+	}
+	data, err := os.ReadFile(shareRegistryPath)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	var loaded map[string]managedShare
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("decode registry: %v", err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("persisted %d services, want 2", len(loaded))
+	}
+	if loaded["token-ssh"].Target != "127.0.0.1:22" || loaded["token-web"].Target != "http://127.0.0.1:8080" {
+		t.Fatalf("service records were not preserved: %#v", loaded)
+	}
+	if info, err := os.Stat(shareRegistryPath); err != nil {
+		t.Fatalf("stat registry: %v", err)
+	} else if info.Mode().Perm() != 0600 {
+		t.Fatalf("registry permissions = %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestListManagedSharesReturnsEveryService(t *testing.T) {
+	previousShares := managedShares
+	managedShares = map[string]managedShare{
+		"token-one": {ShareToken: "token-one", BackendMode: "tcpTunnel", Target: "127.0.0.1:22"},
+		"token-two": {ShareToken: "token-two", BackendMode: "web", Target: "http://127.0.0.1:8080"},
+	}
+	defer func() { managedShares = previousShares }()
+
+	var listed []managedShare
+	if err := json.Unmarshal([]byte(ListManagedShares()), &listed); err != nil {
+		t.Fatalf("decode listed services: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("listed %d services, want 2", len(listed))
 	}
 }
