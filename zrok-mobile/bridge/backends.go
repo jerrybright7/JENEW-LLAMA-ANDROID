@@ -3,6 +3,8 @@ package bridge
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -88,15 +90,21 @@ func StartShareBackend(shareToken, backendMode, target string) error {
 		}
 		backend, err = proxy.NewBackend(&proxy.BackendConfig{IdentityPath: identityPath, EndpointAddress: target, ShrToken: shareToken})
 	case "web":
-		if target == "" { return errors.New("web root directory is required") }
+		if !filepath.IsAbs(target) { return errors.New("web root must be an absolute app-private directory path") }
+		webInfo, statErr := os.Stat(target)
+		if statErr != nil || !webInfo.IsDir() { return errors.New("web root must exist and be a directory") }
 		backend, err = proxy.NewCaddyWebBackend(&proxy.CaddyWebBackendConfig{IdentityPath: identityPath, WebRoot: target, ShrToken: shareToken})
 	case "drive":
-		if target == "" { return errors.New("drive root directory is required") }
+		if !filepath.IsAbs(target) { return errors.New("drive root must be an absolute app-private directory path") }
+		driveInfo, statErr := os.Stat(target)
+		if statErr != nil || !driveInfo.IsDir() { return errors.New("drive root must exist and be a directory") }
 		backend, err = drive.NewBackend(&drive.BackendConfig{IdentityPath: identityPath, DriveRoot: target, ShrToken: shareToken})
 	case "socks":
 		backend, err = socks.NewBackend(&socks.BackendConfig{IdentityPath: identityPath, ShrToken: shareToken})
 	case "caddy":
-		if target == "" { return errors.New("Caddyfile path is required") }
+		if !filepath.IsAbs(target) { return errors.New("Caddyfile path must be absolute") }
+		caddyInfo, statErr := os.Stat(target)
+		if statErr != nil || !caddyInfo.Mode().IsRegular() { return errors.New("Caddyfile must exist and be a regular file") }
 		backend, err = proxy.NewCaddyfileBackend(&proxy.CaddyfileBackendConfig{
 			CaddyfilePath: target, Shr: &sdk.Share{Token: shareToken},
 		})
