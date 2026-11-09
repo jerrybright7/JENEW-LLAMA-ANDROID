@@ -1,0 +1,97 @@
+name: JENEW zrok Android ARM64 Build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-zrok-android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-zrok:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout zrok v2.0.9
+        uses: actions/checkout@v4
+        with:
+          repository: openziti/zrok
+          ref: v2.0.9
+          path: zrok
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+          cache-dependency-path: zrok/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build embedded zrok frontends
+        run: |
+          set -euo pipefail
+          npm --prefix zrok/ui install
+          npm --prefix zrok/ui run build
+          npm --prefix zrok/agent/agentUi install
+          npm --prefix zrok/agent/agentUi run build
+          test -d zrok/ui/dist
+          test -d zrok/agent/agentUi/dist
+
+      - name: Install Android NDK
+        run: |
+          SDK="$ANDROID_SDK_ROOT"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865"
+          echo "ANDROID_NDK=$SDK/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
+      - name: Cross-compile zrok for Android ARM64
+        env:
+          GOOS: android
+          GOARCH: arm64
+          CGO_ENABLED: "1"
+        run: |
+          set -euo pipefail
+          cd zrok
+
+          export CC="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang"
+          export CXX="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang++"
+
+          test -x "$CC"
+          go version
+          go env GOOS GOARCH CGO_ENABLED CC
+
+          mkdir -p ../output
+          go build \
+            -trimpath \
+            -ldflags="-s -w" \
+            -o ../output/zrok2 \
+            ./cmd/zrok2
+
+          chmod 755 ../output/zrok2
+          file ../output/zrok2
+          readelf -h ../output/zrok2
+          readelf -l ../output/zrok2
+
+          cp LICENSE ../output/
+          cd ../output
+          sha256sum zrok2 > SHA256SUMS
+          zip -9 -j ../JENEW-ZROK-ANDROID-ARM64.zip zrok2 LICENSE SHA256SUMS
+
+      - name: Upload Android ARM64 test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JENEW-ZROK-ANDROID-ARM64
+          path: |
+            output/zrok2
+            output/LICENSE
+            output/SHA256SUMS
+            JENEW-ZROK-ANDROID-ARM64.zip
+          if-no-files-found: error
+          retention-days: 14
