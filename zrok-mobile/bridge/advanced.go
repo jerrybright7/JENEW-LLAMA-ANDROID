@@ -32,6 +32,8 @@ type managedAccess struct {
 	ShareToken  string `json:"shareToken"`
 	AccessToken string `json:"accessToken"`
 	BackendMode string `json:"backendMode"`
+	BindAddress string `json:"bindAddress,omitempty"`
+	AutoStart   bool   `json:"autoStart,omitempty"`
 	CreatedAt   string `json:"createdAt"`
 }
 
