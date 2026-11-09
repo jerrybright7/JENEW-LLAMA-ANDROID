@@ -205,8 +205,13 @@ func Initialize(privateAppDirectory string) error {
 		return errors.New("zrok root must be a non-empty absolute app-private path")
 	}
 	privateAppDirectory = filepath.Clean(privateAppDirectory)
-	if root != nil && root.Metadata() != nil && root.Metadata().RootPath != privateAppDirectory && len(forwarders) > 0 {
-		return errors.New("cannot switch zrok storage roots while TCP forwarders are active")
+	if root != nil && root.Metadata() != nil {
+		if root.Metadata().RootPath != privateAppDirectory && len(forwarders) > 0 {
+			return errors.New("cannot switch zrok storage roots while TCP forwarders are active")
+		}
+		if root.Metadata().RootPath == privateAppDirectory && len(forwarders) > 0 {
+			return nil
+		}
 	}
 	if err := os.MkdirAll(privateAppDirectory, 0700); err != nil {
 		return fmt.Errorf("create private zrok directory: %w", err)
@@ -233,6 +238,9 @@ func Initialize(privateAppDirectory string) error {
 		if err := json.Unmarshal(registryData, &managedShares); err != nil {
 			return fmt.Errorf("decode zrok share registry: %w", err)
 		}
+	}
+	if managedShares == nil {
+		managedShares = map[string]managedShare{}
 	}
 	// Process restarts close listeners. Retain service definitions, but only
 	// report a service running after its forwarder has been recreated.
