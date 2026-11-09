@@ -65,7 +65,7 @@ func TestLiveZrokMultiServiceRoundTrip(t *testing.T) {
 	}
 	createAndStart := func(target string) string {
 		t.Helper()
-		result, err := CreateShare("tcpTunnel", "public", target)
+		result, err := CreateShare("tcpTunnel", "private", target)
 		if err != nil {
 			t.Fatalf("create live zrok TCP share: %v", err)
 		}
@@ -87,8 +87,8 @@ func TestLiveZrokMultiServiceRoundTrip(t *testing.T) {
 	tokenOne := createAndStart(targetOne)
 	tokenTwo := createAndStart(targetTwo)
 
-	// A share token identifies the hosted share, but NewDialer requires the
-	// frontend token returned by CreateAccess. Create one access per share.
+	// Private shares require an access grant. NewDialer still dials the share
+	// token; the frontend token is for the local/public frontend, not Ziti dialing.
 	accessOne, err := sdk.CreateAccess(root, &sdk.AccessRequest{ShareToken: tokenOne})
 	if err != nil {
 		t.Fatalf("create access for first live share: %v", err)
@@ -100,7 +100,7 @@ func TestLiveZrokMultiServiceRoundTrip(t *testing.T) {
 	}
 	accesses = append(accesses, accessTwo)
 
-	// Dial through each access token to exercise the authenticated Ziti data plane.
+	// Dial each private share by its share token through the authenticated Ziti data plane.
 	exchange := func(accessToken, message string) error {
 		conn, err := sdk.NewDialer(accessToken, root)
 		if err != nil {
@@ -126,11 +126,11 @@ func TestLiveZrokMultiServiceRoundTrip(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		errs <- exchange(accessOne.Token, "live-service-one")
+		errs <- exchange(tokenOne, "live-service-one")
 	}()
 	go func() {
 		defer wg.Done()
-		errs <- exchange(accessTwo.Token, "live-service-two")
+		errs <- exchange(tokenTwo, "live-service-two")
 	}()
 	wg.Wait()
 	close(errs)
@@ -145,7 +145,7 @@ func TestLiveZrokMultiServiceRoundTrip(t *testing.T) {
 		t.Fatalf("stop first live service: %v", err)
 	}
 	started = started[1:]
-	if err := exchange(accessTwo.Token, "second-service-survives-first-stop"); err != nil {
+	if err := exchange(tokenTwo, "second-service-survives-first-stop"); err != nil {
 		t.Fatalf("second live service failed after stopping first: %v", err)
 	}
 
