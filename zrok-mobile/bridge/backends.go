@@ -176,6 +176,12 @@ func StopShareBackend(shareToken string) error {
 }
 
 // ActiveBackendCount reports the number of live backend engines.
+func backendIsRunning(shareToken string) bool {
+	backendMu.Lock()
+	defer backendMu.Unlock()
+	return backends[shareToken] != nil
+}
+
 func ActiveBackendCount() int {
 	backendMu.Lock()
 	defer backendMu.Unlock()
