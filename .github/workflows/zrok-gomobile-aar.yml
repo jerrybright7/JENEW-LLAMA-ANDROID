@@ -1,0 +1,70 @@
+name: JENEW zrok Go SDK Android AAR Prototype
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - zrok-gomobile-prototype
+    paths:
+      - ".github/workflows/zrok-gomobile-aar.yml"
+      - "zrok-mobile/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build-aar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout prototype
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+          cache-dependency-path: zrok-mobile/go.sum
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;29.0.14206865"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
+      - name: Install and initialize gomobile
+        run: |
+          set -euo pipefail
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          "$(go env GOPATH)/bin/gomobile" init
+
+      - name: Resolve zrok SDK and build Android AAR
+        working-directory: zrok-mobile
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          set -euo pipefail
+          export ANDROID_HOME="$ANDROID_SDK_ROOT"
+          export ANDROID_NDK_HOME="$ANDROID_NDK"
+          go mod tidy
+          go list -deps ./...
+          mkdir -p ../output
+          gomobile bind -v -target=android/arm64 -androidapi 23 -trimpath -ldflags="-s -w" -o ../output/jenew-zrok-sdk.aar ./bridge
+          test -s ../output/jenew-zrok-sdk.aar
+          unzip -l ../output/jenew-zrok-sdk.aar
+          unzip -p ../output/jenew-zrok-sdk.aar AndroidManifest.xml >/dev/null
+
+      - name: Upload prototype AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: JENEW-ZROK-GOMOBILE-AAR-PROTOTYPE
+          path: output/jenew-zrok-sdk.aar
+          if-no-files-found: error
+          retention-days: 14
