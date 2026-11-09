@@ -514,6 +514,10 @@ func StartTCPForwarder(shareToken, localAddress string) error {
 	}
 	forwarders[shareToken] = forwarder
 	setManagedShareRunningLocked(shareToken, true)
+	if share, ok := managedShares[shareToken]; ok {
+		share.AutoStart = true
+		managedShares[shareToken] = share
+	}
 	if err := persistManagedSharesLocked(); err != nil {
 		delete(forwarders, shareToken)
 		setManagedShareRunningLocked(shareToken, false)
