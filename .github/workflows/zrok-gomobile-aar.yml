@@ -82,10 +82,29 @@ jobs:
           go mod tidy
           go list -deps ./...
           mkdir -p ../output
-          gomobile bind -v -target=android/arm64 -androidapi 23 -trimpath -ldflags="-s -w" -o ../output/jenew-zrok-sdk.aar ./bridge
+          gomobile bind -v -target=android/arm64,android/amd64 -androidapi 23 -trimpath -ldflags="-s -w" -o ../output/jenew-zrok-sdk.aar ./bridge
           test -s ../output/jenew-zrok-sdk.aar
           unzip -l ../output/jenew-zrok-sdk.aar
           unzip -p ../output/jenew-zrok-sdk.aar AndroidManifest.xml >/dev/null
+
+      - name: Set up Java for Android bridge compilation
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle for Android bridge compilation
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Compile isolated Android app against generated AAR
+        run: |
+          set -euo pipefail
+          mkdir -p android-smoke/app/libs
+          cp output/jenew-zrok-sdk.aar android-smoke/app/libs/
+          gradle -p android-smoke --no-daemon assembleDebug
+          test -s android-smoke/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload prototype AAR
         uses: actions/upload-artifact@v4
