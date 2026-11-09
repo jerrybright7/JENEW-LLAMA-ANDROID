@@ -22,6 +22,7 @@ public final class MainActivity extends Activity {
     private LinearLayout rootLayout;
     private TextView statusView;
     private TextView messageView;
+    private LinearLayout servicesContainer;
     private EditText endpointInput, tokenInput, hostInput, targetInput;
     private static final String DEFAULT_API = "https://api-v2.zrok.io";
 
@@ -88,6 +89,9 @@ public final class MainActivity extends Activity {
 
         addSection("MANAGED SERVICES");
         addButton("REFRESH STATUS + SERVICES", this::refresh);
+        servicesContainer = new LinearLayout(this);
+        servicesContainer.setOrientation(LinearLayout.VERTICAL);
+        rootLayout.addView(servicesContainer);
         addButton("DISABLE ENVIRONMENT", () ->
             runTask("Disabling environment…", () -> bridge.Bridge.disableEnvironment()));
     }
@@ -118,7 +122,7 @@ public final class MainActivity extends Activity {
     }
 
     private void refresh() {
-        runTask("Refreshing…", () -> null);
+        messageView.setText("Refreshing…");
         worker.execute(() -> {
             try {
                 String status = bridge.Bridge.status();
@@ -138,13 +142,7 @@ public final class MainActivity extends Activity {
                 + "   •   Active forwarders: " + status.optInt("activeForwarders")
                 + "   •   Managed: " + status.optInt("managedShares"));
             JSONArray shares = new JSONArray(sharesJson);
-            // Remove only previously rendered service rows, preserving form controls.
-            int marker = rootLayout.indexOfChild(findSection("MANAGED SERVICES"));
-            if (marker >= 0) {
-                while (rootLayout.getChildCount() > marker + 2) {
-                    rootLayout.removeViewAt(marker + 2);
-                }
-            }
+            servicesContainer.removeAllViews();
             for (int i = 0; i < shares.length(); i++) {
                 JSONObject share = shares.getJSONObject(i);
                 addServiceRow(share);
@@ -172,7 +170,7 @@ public final class MainActivity extends Activity {
             + "\n" + share.optString("backendMode") + " / " + share.optString("shareMode"));
         info.setTextSize(14);
         info.setPadding(0, dp(12), 0, dp(4));
-        rootLayout.addView(info);
+        servicesContainer.addView(info);
         Button toggle = new Button(this);
         toggle.setText(running ? "STOP FORWARDER" : "START FORWARDER");
         toggle.setOnClickListener(v -> runTask(running ? "Stopping…" : "Starting…", () -> {
@@ -180,14 +178,14 @@ public final class MainActivity extends Activity {
             else bridge.Bridge.startTCPForwarder(shareToken, target);
             return null;
         }));
-        rootLayout.addView(toggle, new LinearLayout.LayoutParams(-1, dp(48)));
+        servicesContainer.addView(toggle, new LinearLayout.LayoutParams(-1, dp(48)));
         Button delete = new Button(this);
         delete.setText("DELETE SHARE");
         delete.setOnClickListener(v -> runTask("Deleting share…", () -> {
             bridge.Bridge.deleteShare(shareToken);
             return null;
         }));
-        rootLayout.addView(delete, new LinearLayout.LayoutParams(-1, dp(48)));
+        servicesContainer.addView(delete, new LinearLayout.LayoutParams(-1, dp(48)));
     }
 
     private interface Work { Object run() throws Exception; }
