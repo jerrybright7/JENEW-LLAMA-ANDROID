@@ -98,6 +98,9 @@ func EnableEnvironment(apiEndpoint, accountToken, host, description string) erro
 		Description: description,
 	})
 	if err != nil {
+		// The pre-enable environment exists only to supply the account token
+		// to the SDK request. Remove it on failure so a retry is possible.
+		_ = root.DeleteEnvironment()
 		return fmt.Errorf("enable zrok environment: %w", err)
 	}
 
