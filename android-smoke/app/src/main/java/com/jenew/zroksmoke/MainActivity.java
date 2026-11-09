@@ -32,7 +32,7 @@ public final class MainActivity extends Activity {
     private LinearLayout rootLayout;
     private TextView statusView, messageView;
     private LinearLayout servicesContainer;
-    private EditText endpointInput, tokenInput, hostInput, targetInput, advancedOptionsInput, accessShareInput, accessTokenInput;
+    private EditText endpointInput, tokenInput, hostInput, targetInput, advancedOptionsInput, accessShareInput, accessTokenInput, accessBindInput;
     private Spinner backendInput, modeInput;
     private static final String DEFAULT_API = "https://api-v2.zrok.io";
     private static final String[] BACKENDS = {
@@ -118,6 +118,26 @@ public final class MainActivity extends Activity {
 
         addSection("PRIVATE ACCESS");
         accessShareInput = addInput("Private share token to access", "", false);
+        accessBindInput = addInput("Local TCP bind address", "127.0.0.1:9000", false);
+        addButton("START PRIVATE TCP ACCESS", () -> {
+            final String share = value(accessShareInput);
+            final String bind = value(accessBindInput);
+            runTask("Starting private TCP access…", () -> {
+                ZrokForegroundService.start(this);
+                try {
+                    bridge.Bridge.startTCPAccessForwarder(share, bind);
+                } catch (Throwable failure) {
+                    if (bridge.Bridge.activeBackendCount() == 0) ZrokForegroundService.stop(this);
+                    throw failure;
+                }
+                return null;
+            });
+        });
+        addButton("STOP PRIVATE TCP ACCESS", () -> runTask("Stopping private TCP access…", () -> {
+            bridge.Bridge.stopTCPAccessForwarder(value(accessShareInput));
+            if (bridge.Bridge.activeBackendCount() == 0) ZrokForegroundService.stop(this);
+            return null;
+        }));
         addButton("CREATE PRIVATE ACCESS GRANT", () -> {
             final String share = value(accessShareInput);
             runTaskWithResult("Creating private access grant…", () ->
