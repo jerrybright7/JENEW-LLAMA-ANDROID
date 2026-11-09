@@ -27,6 +27,8 @@ func TestBuildShareRequestRejectsInvalidInput(t *testing.T) {
 		name, backend, mode, target string
 	}{
 		{"empty target", "tcpTunnel", "public", ""},
+		{"invalid TCP target", "tcpTunnel", "public", "localhost"},
+		{"invalid TCP port", "tcpTunnel", "public", "127.0.0.1:70000"},
 		{"unknown backend", "shell", "public", "127.0.0.1:8080"},
 		{"unknown share mode", "tcpTunnel", "internet", "127.0.0.1:8080"},
 	}
