@@ -90,6 +90,29 @@ func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 	accessForwarders[shareToken] = f
 	backendMu.Unlock()
 
+	mu.Lock()
+	record, ok := managedAccesses[accessToken]
+	if !ok {
+		mu.Unlock()
+		backendMu.Lock()
+		delete(accessForwarders, shareToken)
+		backendMu.Unlock()
+		_ = f.close()
+		return errors.New("private access grant disappeared before forwarding started")
+	}
+	record.BindAddress = bindAddress
+	record.AutoStart = true
+	managedAccesses[accessToken] = record
+	persistErr := persistAccessesLocked()
+	mu.Unlock()
+	if persistErr != nil {
+		backendMu.Lock()
+		delete(accessForwarders, shareToken)
+		backendMu.Unlock()
+		_ = f.close()
+		return persistErr
+	}
+
 	go func() {
 		defer func() {
 			_ = f.close()
@@ -128,7 +151,6 @@ func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 			}(local)
 		}
 	}()
-	_ = accessToken // stored in the protected registry for later revocation
 	return nil
 }
 
@@ -141,11 +163,77 @@ func StopTCPAccessForwarder(shareToken string) error {
 	if f != nil { delete(accessForwarders, shareToken) }
 	backendMu.Unlock()
 	if f == nil { return errors.New("no private access forwarder is running for this share") }
-	return f.close()
+	err := f.close()
+	mu.Lock()
+	for token, record := range managedAccesses {
+		if record.ShareToken == shareToken {
+			record.AutoStart = false
+			managedAccesses[token] = record
+		}
+	}
+	persistErr := persistAccessesLocked()
+	mu.Unlock()
+	if err != nil { return err }
+	return persistErr
 }
 
 func ActiveAccessForwarderCount() int32 {
 	backendMu.Lock()
 	defer backendMu.Unlock()
 	return int32(len(accessForwarders))
+}
+
+
+// AutoStartCount reports how many saved share/access engines are configured
+// for restoration after an Android process restart.
+func AutoStartCount() int32 {
+	mu.Lock()
+	defer mu.Unlock()
+	count := int32(0)
+	for _, share := range managedShares {
+		if share.AutoStart { count++ }
+	}
+	if ensureAccessRegistryLocked() == nil {
+		for _, access := range managedAccesses {
+			if access.AutoStart { count++ }
+		}
+	}
+	return count
+}
+
+// RestoreManagedBackends reopens the share and private-access listeners that
+// were active before the Android process was restarted.
+func RestoreManagedBackends() error {
+	mu.Lock()
+	if root == nil || !root.IsEnabled() {
+		mu.Unlock()
+		return errors.New("zrok environment is not enabled")
+	}
+	shares := make([]managedShare, 0)
+	for _, share := range managedShares {
+		if share.AutoStart { shares = append(shares, share) }
+	}
+	if err := ensureAccessRegistryLocked(); err != nil {
+		mu.Unlock()
+		return err
+	}
+	accesses := make([]managedAccess, 0)
+	for _, access := range managedAccesses {
+		if access.AutoStart { accesses = append(accesses, access) }
+	}
+	mu.Unlock()
+
+	var failures []string
+	for _, share := range shares {
+		if err := StartShareBackend(share.ShareToken, share.BackendMode, share.Target); err != nil {
+			failures = append(failures, fmt.Sprintf("%s backend: %v", share.BackendMode, err))
+		}
+	}
+	for _, access := range accesses {
+		if err := StartTCPAccessForwarder(access.ShareToken, access.BindAddress); err != nil {
+			failures = append(failures, fmt.Sprintf("private access: %v", err))
+		}
+	}
+	if len(failures) > 0 { return fmt.Errorf("some zrok engines could not be restored: %s", strings.Join(failures, "; ")) }
+	return nil
 }
