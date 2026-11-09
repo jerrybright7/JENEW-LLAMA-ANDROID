@@ -40,10 +40,14 @@ func TestLiveZrokMultiServiceRoundTrip(t *testing.T) {
 	}
 
 	var tokens []string
+	var accesses []*sdk.Access
 	var started []string
 	defer func() {
 		for _, token := range started {
 			_ = StopTCPForwarder(token)
+		}
+		for _, access := range accesses {
+			_ = sdk.DeleteAccess(root, access)
 		}
 		for _, token := range tokens {
 			_ = DeleteShare(token)
@@ -83,10 +87,22 @@ func TestLiveZrokMultiServiceRoundTrip(t *testing.T) {
 	tokenOne := createAndStart(targetOne)
 	tokenTwo := createAndStart(targetTwo)
 
-	// Use zrok's own SDK dialer against each live share. This traverses the
-	// authenticated Ziti data plane rather than the local test listener alone.
-	exchange := func(token, message string) error {
-		conn, err := sdk.NewDialer(token, root)
+	// A share token identifies the hosted share, but NewDialer requires the
+	// frontend token returned by CreateAccess. Create one access per share.
+	accessOne, err := sdk.CreateAccess(root, &sdk.AccessRequest{ShareToken: tokenOne})
+	if err != nil {
+		t.Fatalf("create access for first live share: %v", err)
+	}
+	accesses = append(accesses, accessOne)
+	accessTwo, err := sdk.CreateAccess(root, &sdk.AccessRequest{ShareToken: tokenTwo})
+	if err != nil {
+		t.Fatalf("create access for second live share: %v", err)
+	}
+	accesses = append(accesses, accessTwo)
+
+	// Dial through each access token to exercise the authenticated Ziti data plane.
+	exchange := func(accessToken, message string) error {
+		conn, err := sdk.NewDialer(accessToken, root)
 		if err != nil {
 			return fmt.Errorf("create zrok dialer: %w", err)
 		}
@@ -110,11 +126,11 @@ func TestLiveZrokMultiServiceRoundTrip(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		errs <- exchange(tokenOne, "live-service-one")
+		errs <- exchange(accessOne.Token, "live-service-one")
 	}()
 	go func() {
 		defer wg.Done()
-		errs <- exchange(tokenTwo, "live-service-two")
+		errs <- exchange(accessTwo.Token, "live-service-two")
 	}()
 	wg.Wait()
 	close(errs)
@@ -129,7 +145,7 @@ func TestLiveZrokMultiServiceRoundTrip(t *testing.T) {
 		t.Fatalf("stop first live service: %v", err)
 	}
 	started = started[1:]
-	if err := exchange(tokenTwo, "second-service-survives-first-stop"); err != nil {
+	if err := exchange(accessTwo.Token, "second-service-survives-first-stop"); err != nil {
 		t.Fatalf("second live service failed after stopping first: %v", err)
 	}
 
