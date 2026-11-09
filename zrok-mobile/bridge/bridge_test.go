@@ -204,3 +204,24 @@ func TestPrivateAccessRegistryIsOwnerOnlyAndReloadable(t *testing.T) {
 		t.Fatalf("access registry did not reload: %#v", managedAccesses)
 	}
 }
+
+func TestBuildShareRequestSupportsModeSpecificTargets(t *testing.T) {
+	cases := []struct {
+		backend, target string
+	}{
+		{"socks", ""},
+		{"udpTunnel", "127.0.0.1:5353"},
+		{"proxy", "https://127.0.0.1:8443"},
+		{"web", "/data/user/0/com.jenew.zroksmoke/files/www"},
+		{"drive", "/data/user/0/com.jenew.zroksmoke/files/drive"},
+		{"caddy", "/data/user/0/com.jenew.zroksmoke/files/Caddyfile"},
+	}
+	for _, tc := range cases {
+		if _, err := buildShareRequest(tc.backend, "private", tc.target); err != nil {
+			t.Errorf("%s target %q rejected: %v", tc.backend, tc.target, err)
+		}
+	}
+	if _, err := buildShareRequest("proxy", "private", "localhost:8080"); err == nil {
+		t.Fatal("proxy accepted a target without an HTTP scheme")
+	}
+}
