@@ -1,9 +1,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <application
         android:allowBackup="false"
         android:label="JENEW zrok SDK Smoke Test"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <service
+            android:name=".ZrokForegroundService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Maintains user-started zrok share and private-access network tunnels" />
+        </service>
         <activity
             android:name=".MainActivity"
             android:exported="true">
