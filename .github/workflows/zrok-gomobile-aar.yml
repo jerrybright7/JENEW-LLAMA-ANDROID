@@ -27,16 +27,19 @@ jobs:
           cache: true
           cache-dependency-path: zrok-mobile/go.mod
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools'
-
-      - name: Install Android NDK
+      # Use the Android SDK already provisioned on GitHub's Ubuntu runner.
+      # Avoid setup-android@v3: it attempts to install the retired "tools" package.
+      - name: Install Android SDK components
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;29.0.14206865"
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
+          export ANDROID_HOME="$ANDROID_SDK_ROOT"
+          SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "ndk;29.0.14206865"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
           echo "ANDROID_NDK=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
