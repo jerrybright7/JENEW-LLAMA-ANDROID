@@ -54,6 +54,7 @@ public final class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7402);
         }
         refresh();
+        if (bridge.Bridge.autoStartCount() > 0) ZrokForegroundService.start(this);
     }
 
     private void buildScreen() {
