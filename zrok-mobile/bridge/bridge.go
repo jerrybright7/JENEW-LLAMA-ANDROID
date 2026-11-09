@@ -36,6 +36,7 @@ type managedShare struct {
 	Target           string   `json:"target"`
 	FrontendEndpoints []string `json:"frontendEndpoints,omitempty"`
 	Running          bool     `json:"running"`
+	AutoStart        bool     `json:"autoStart"`
 	CreatedAt        string   `json:"createdAt"`
 }
 
@@ -211,7 +212,7 @@ func Initialize(privateAppDirectory string) error {
 		if root.Metadata().RootPath != privateAppDirectory && (len(forwarders) > 0 || ActiveBackendCount() > 0) {
 			return errors.New("cannot switch zrok storage roots while TCP forwarders are active")
 		}
-		if root.Metadata().RootPath == privateAppDirectory && len(forwarders) > 0 {
+		if root.Metadata().RootPath == privateAppDirectory && (len(forwarders) > 0 || ActiveBackendCount() > 0) {
 			return nil
 		}
 	}
@@ -249,6 +250,9 @@ func Initialize(privateAppDirectory string) error {
 	// Process restarts close listeners. Retain service definitions, but only
 	// report a service running after its forwarder has been recreated.
 	for token, share := range managedShares {
+		if share.Running {
+			share.AutoStart = true
+		}
 		share.Running = false
 		managedShares[token] = share
 	}
@@ -582,7 +586,11 @@ func StopTCPForwarder(shareToken string) error {
 	}
 	err := forwarder.close()
 	mu.Lock()
-	setManagedShareRunningLocked(shareToken, false)
+	if share, ok := managedShares[shareToken]; ok {
+		share.Running = false
+		share.AutoStart = false
+		managedShares[shareToken] = share
+	}
 	persistErr := persistManagedSharesLocked()
 	mu.Unlock()
 	if err != nil {
