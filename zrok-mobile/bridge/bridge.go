@@ -231,6 +231,8 @@ func Initialize(privateAppDirectory string) error {
 	}
 	root = loaded
 	shareRegistryPath = filepath.Join(privateAppDirectory, "managed-shares.json")
+	accessRegistryPath = ""
+	managedAccesses = map[string]managedAccess{}
 	managedShares = map[string]managedShare{}
 	registryData, readErr := os.ReadFile(shareRegistryPath)
 	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
@@ -360,6 +362,13 @@ func DisableEnvironment() error {
 		return fmt.Errorf("remove local zrok credentials after remote disable: %w", err)
 	}
 	managedShares = map[string]managedShare{}
+	managedAccesses = map[string]managedAccess{}
+	if accessRegistryPath != "" {
+		if err := os.Remove(accessRegistryPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove local zrok access registry: %w", err)
+		}
+		accessRegistryPath = ""
+	}
 	if shareRegistryPath != "" {
 		if err := os.Remove(shareRegistryPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove local zrok share registry: %w", err)
