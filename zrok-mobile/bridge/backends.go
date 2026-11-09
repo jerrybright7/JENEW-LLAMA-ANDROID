@@ -182,8 +182,8 @@ func backendIsRunning(shareToken string) bool {
 	return backends[shareToken] != nil || accessForwarders[shareToken] != nil
 }
 
-func ActiveBackendCount() int {
+func ActiveBackendCount() int32 {
 	backendMu.Lock()
 	defer backendMu.Unlock()
-	return len(backends) + len(accessForwarders)
+	return int32(len(backends) + len(accessForwarders))
 }
