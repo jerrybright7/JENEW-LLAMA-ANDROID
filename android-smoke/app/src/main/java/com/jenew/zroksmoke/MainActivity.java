@@ -12,6 +12,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
 import android.view.View;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -33,7 +34,8 @@ public final class MainActivity extends Activity {
     private TextView statusView, messageView;
     private LinearLayout servicesContainer;
     private EditText endpointInput, tokenInput, hostInput, targetInput, advancedOptionsInput, accessShareInput, accessTokenInput, accessBindInput, driveShareInput, driveRemoteInput, driveLocalInput, driveDestinationInput, namespaceInput, metricsShareInput, metricsDurationInput;
-    private Spinner backendInput, modeInput;
+    private Spinner backendInput, modeInput, managedShareInput;
+    private final List<String> managedShareTokens = new ArrayList<>();
     private static final String DEFAULT_API = "https://api-v2.zrok.io";
     private static final String[] BACKENDS = {
         "tcpTunnel", "web", "proxy", "udpTunnel", "caddy", "drive", "socks"
@@ -121,10 +123,10 @@ public final class MainActivity extends Activity {
         });
 
         addSection("PRIVATE ACCESS");
-        accessShareInput = addInput("Private share token to access", "", false);
+        managedShareInput = addSpinner("Select managed share (share tokens stay hidden)", new String[]{"No managed shares yet"});
         accessBindInput = addInput("Local TCP bind address", "127.0.0.1:9000", false);
         addButton("START PRIVATE TCP ACCESS", () -> {
-            final String share = value(accessShareInput);
+            final String share = selectedManagedShareToken();
             final String bind = value(accessBindInput);
             runTask("Starting private TCP access…", () -> {
                 ZrokForegroundService.start(this);
@@ -138,12 +140,12 @@ public final class MainActivity extends Activity {
             });
         });
         addButton("STOP PRIVATE TCP ACCESS", () -> runTask("Stopping private TCP access…", () -> {
-            bridge.Bridge.stopTCPAccessForwarder(value(accessShareInput));
+            bridge.Bridge.stopTCPAccessForwarder(selectedManagedShareToken());
             if (bridge.Bridge.activeBackendCount() == 0) ZrokForegroundService.stop(this);
             return null;
         }));
         addButton("CREATE PRIVATE ACCESS GRANT", () -> {
-            final String share = value(accessShareInput);
+            final String share = selectedManagedShareToken();
             runTaskWithResult("Creating private access grant…", () ->
                 bridge.Bridge.createAccessGrant(share, ""));
         });
@@ -162,35 +164,34 @@ public final class MainActivity extends Activity {
             "Loading private accesses…", () -> bridge.Bridge.listManagedAccesses()));
 
         addSection("ZROK DRIVE FILE OPERATIONS");
-        driveShareInput = addInput("Drive share token", "", false);
         driveRemoteInput = addInput("Remote Drive path", "/", false);
         driveLocalInput = addInput("Local app-private path (relative)", "downloads/file.bin", false);
         driveDestinationInput = addInput("Remote destination path", "/backup/file.bin", false);
         addButton("LIST DRIVE DIRECTORY", () -> runTaskWithResult("Listing remote Drive files…",
-            () -> bridge.Bridge.driveList(value(driveShareInput), value(driveRemoteInput), false)));
+            () -> bridge.Bridge.driveList(selectedManagedShareToken(), value(driveRemoteInput), false)));
         addButton("DOWNLOAD FROM DRIVE", () -> runTask("Downloading from Drive…", () -> {
-            bridge.Bridge.driveDownload(value(driveShareInput), value(driveRemoteInput), value(driveLocalInput));
+            bridge.Bridge.driveDownload(selectedManagedShareToken(), value(driveRemoteInput), value(driveLocalInput));
             return null;
         }));
         addButton("UPLOAD TO DRIVE", () -> runTask("Uploading to Drive…", () -> {
-            bridge.Bridge.driveUpload(value(driveShareInput), value(driveLocalInput), value(driveRemoteInput));
+            bridge.Bridge.driveUpload(selectedManagedShareToken(), value(driveLocalInput), value(driveRemoteInput));
             return null;
         }));
         addButton("CREATE DRIVE DIRECTORY", () -> runTask("Creating remote Drive directory…", () -> {
-            bridge.Bridge.driveMkdir(value(driveShareInput), value(driveRemoteInput));
+            bridge.Bridge.driveMkdir(selectedManagedShareToken(), value(driveRemoteInput));
             return null;
         }));
         addButton("COPY DRIVE ITEM", () -> runTask("Copying remote Drive item…", () -> {
-            bridge.Bridge.driveCopy(value(driveShareInput), value(driveRemoteInput), value(driveDestinationInput), true);
+            bridge.Bridge.driveCopy(selectedManagedShareToken(), value(driveRemoteInput), value(driveDestinationInput), true);
             return null;
         }));
         addButton("MOVE DRIVE ITEM", () -> runTask("Moving remote Drive item…", () -> {
-            bridge.Bridge.driveMove(value(driveShareInput), value(driveRemoteInput), value(driveDestinationInput), true);
+            bridge.Bridge.driveMove(selectedManagedShareToken(), value(driveRemoteInput), value(driveDestinationInput), true);
             return null;
         }));
         addButton("DELETE DRIVE ITEM", () -> confirm("Delete Drive item?", "This permanently removes the selected remote file or directory.", () ->
             runTask("Deleting remote Drive item…", () -> {
-                bridge.Bridge.driveRemove(value(driveShareInput), value(driveRemoteInput));
+                bridge.Bridge.driveRemove(selectedManagedShareToken(), value(driveRemoteInput));
                 return null;
             })));
         addButton("CREATE ZROK SHARE", () -> {
@@ -214,9 +215,8 @@ public final class MainActivity extends Activity {
         metricsDurationInput = addInput("Metrics duration (e.g. 24h, 7d)", "24h", false);
         addButton("GET ACCOUNT METRICS", () -> runTaskWithResult("Loading account usage metrics…",
             () -> bridge.Bridge.getAccountMetrics(value(metricsDurationInput))));
-        metricsShareInput = addInput("Share token for metrics", "", false);
         addButton("GET SHARE METRICS", () -> runTaskWithResult("Loading share metrics…",
-            () -> bridge.Bridge.getShareMetrics(value(metricsShareInput), value(metricsDurationInput))));
+            () -> bridge.Bridge.getShareMetrics(selectedManagedShareToken(), value(metricsDurationInput))));
 
         addSection("MANAGED SERVICES");
         addButton("REFRESH STATUS + SERVICES", this::refresh);
@@ -296,12 +296,46 @@ public final class MainActivity extends Activity {
                 + "   •   Managed: " + status.optInt("managedShares")
                 + (status.has("apiEndpoint") ? "\nAPI: " + status.optString("apiEndpoint") : ""));
             JSONArray shares = new JSONArray(sharesJson);
+            updateManagedShareSelector(shares);
             servicesContainer.removeAllViews();
             for (int i = 0; i < shares.length(); i++) addServiceRow(shares.getJSONObject(i));
             messageView.setText("State refreshed. Credentials and share tokens are kept inside app-private storage.");
         } catch (Throwable error) {
             messageView.setText("Could not render service list: " + safeMessage(error));
         }
+    }
+
+    private void updateManagedShareSelector(JSONArray shares) throws Exception {
+        String previouslySelected = selectedManagedShareTokenOrEmpty();
+        managedShareTokens.clear();
+        List<String> labels = new ArrayList<>();
+        for (int i = 0; i < shares.length(); i++) {
+            JSONObject share = shares.getJSONObject(i);
+            String token = share.optString("shareToken", "").trim();
+            if (token.isEmpty()) continue;
+            managedShareTokens.add(token);
+            String backend = share.optString("backendMode", "share");
+            String mode = share.optString("shareMode", "");
+            String target = share.optString("target", "");
+            labels.add(backend + " / " + mode + " — " + target);
+        }
+        if (labels.isEmpty()) labels.add("No managed shares yet — create a share first");
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        managedShareInput.setAdapter(adapter);
+        int selected = managedShareTokens.indexOf(previouslySelected);
+        managedShareInput.setSelection(selected >= 0 ? selected : 0);
+    }
+
+    private String selectedManagedShareTokenOrEmpty() {
+        int position = managedShareInput == null ? -1 : managedShareInput.getSelectedItemPosition();
+        return position >= 0 && position < managedShareTokens.size() ? managedShareTokens.get(position) : "";
+    }
+
+    private String selectedManagedShareToken() {
+        String token = selectedManagedShareTokenOrEmpty();
+        if (token.isEmpty()) throw new IllegalStateException("Select a managed share first. Create a share, then refresh the managed-share list.");
+        return token;
     }
 
     private void addServiceRow(JSONObject share) {
