@@ -179,11 +179,11 @@ func StopShareBackend(shareToken string) error {
 func backendIsRunning(shareToken string) bool {
 	backendMu.Lock()
 	defer backendMu.Unlock()
-	return backends[shareToken] != nil
+	return backends[shareToken] != nil || accessForwarders[shareToken] != nil
 }
 
 func ActiveBackendCount() int {
 	backendMu.Lock()
 	defer backendMu.Unlock()
-	return len(backends)
+	return len(backends) + len(accessForwarders)
 }
