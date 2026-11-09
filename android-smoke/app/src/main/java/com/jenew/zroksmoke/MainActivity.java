@@ -73,8 +73,10 @@ public final class MainActivity extends Activity {
             final String token = value(tokenInput);
             final String host = value(hostInput);
             tokenInput.setText("");
-            runTask("Enabling zrok environment…", () ->
-                bridge.Bridge.enableEnvironment(endpoint, token, host, "JENEW Android zrok control"));
+            runTask("Enabling zrok environment…", () -> {
+                bridge.Bridge.enableEnvironment(endpoint, token, host, "JENEW Android zrok control");
+                return null;
+            });
         });
 
         addSection("CREATE TCP SERVICE");
@@ -93,7 +95,10 @@ public final class MainActivity extends Activity {
         servicesContainer.setOrientation(LinearLayout.VERTICAL);
         rootLayout.addView(servicesContainer);
         addButton("DISABLE ENVIRONMENT", () ->
-            runTask("Disabling environment…", () -> bridge.Bridge.disableEnvironment()));
+            runTask("Disabling environment…", () -> {
+                bridge.Bridge.disableEnvironment();
+                return null;
+            }));
     }
 
     private EditText addInput(String hint, String initial, boolean password) {
