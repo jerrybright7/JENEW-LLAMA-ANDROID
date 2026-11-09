@@ -68,6 +68,7 @@ jobs:
         working-directory: zrok-mobile
         run: |
           set -euo pipefail
+          go mod tidy
           go test ./...
 
       - name: Resolve zrok SDK and build Android AAR
