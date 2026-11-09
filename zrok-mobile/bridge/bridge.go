@@ -4,11 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/openziti/zrok/v2/environment/env_core"
 	"github.com/openziti/zrok/v2/environment/env_v0_4"
@@ -16,9 +20,131 @@ import (
 )
 
 var (
-	mu   sync.Mutex
-	root *env_v0_4.Root
+	mu         sync.Mutex
+	root       *env_v0_4.Root
+	forwarders = map[string]*tcpForwarder{}
 )
+
+type tcpForwarder struct {
+	listener net.Listener
+	stop     chan struct{}
+	once     sync.Once
+	connMu   sync.Mutex
+	closed   bool
+	conns    map[net.Conn]struct{}
+	closeErr error
+}
+
+func (f *tcpForwarder) track(conn net.Conn) bool {
+	f.connMu.Lock()
+	defer f.connMu.Unlock()
+	if f.closed {
+		return false
+	}
+	f.conns[conn] = struct{}{}
+	return true
+}
+
+func (f *tcpForwarder) untrack(conn net.Conn) {
+	f.connMu.Lock()
+	delete(f.conns, conn)
+	f.connMu.Unlock()
+}
+
+func (f *tcpForwarder) close() error {
+	f.once.Do(func() {
+		f.connMu.Lock()
+		f.closed = true
+		close(f.stop)
+		active := make([]net.Conn, 0, len(f.conns))
+		for conn := range f.conns {
+			active = append(active, conn)
+		}
+		f.connMu.Unlock()
+
+		f.closeErr = f.listener.Close()
+		for _, conn := range active {
+			_ = conn.Close()
+		}
+	})
+	return f.closeErr
+}
+
+func (f *tcpForwarder) acceptLoop(localAddress, shareToken string) {
+	defer func() {
+		_ = f.close()
+		mu.Lock()
+		if forwarders[shareToken] == f {
+			delete(forwarders, shareToken)
+		}
+		mu.Unlock()
+	}()
+
+	for {
+		remote, err := f.listener.Accept()
+		if err != nil {
+			select {
+			case <-f.stop:
+				return
+			default:
+			}
+			return
+		}
+		if !f.track(remote) {
+			_ = remote.Close()
+			return
+		}
+		go f.forwardConnection(remote, localAddress)
+	}
+}
+
+func (f *tcpForwarder) forwardConnection(remote net.Conn, localAddress string) {
+	defer func() {
+		_ = remote.Close()
+		f.untrack(remote)
+	}()
+
+	local, err := net.DialTimeout("tcp", localAddress, 10*time.Second)
+	if err != nil {
+		return
+	}
+	if !f.track(local) {
+		_ = local.Close()
+		return
+	}
+	defer func() {
+		_ = local.Close()
+		f.untrack(local)
+	}()
+
+	done := make(chan struct{}, 2)
+	copyStream := func(dst, src net.Conn) {
+		_, _ = io.Copy(dst, src)
+		if closeWriter, ok := dst.(interface{ CloseWrite() error }); ok {
+			_ = closeWriter.CloseWrite()
+		}
+		done <- struct{}{}
+	}
+	go copyStream(local, remote)
+	go copyStream(remote, local)
+
+	<-done
+	_ = remote.Close()
+	_ = local.Close()
+	<-done
+}
+
+func validateTCPAddress(address string) error {
+	host, portText, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil || strings.TrimSpace(host) == "" {
+		return errors.New("local TCP target must be a host:port address")
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return errors.New("local TCP target port must be between 1 and 65535")
+	}
+	return nil
+}
 
 // Initialize points zrok's on-disk environment at a directory owned by the
 // Android application (normally Context.getFilesDir()/zrok2). The caller must
@@ -135,7 +261,8 @@ func Status() string {
 		"initialized": root != nil,
 		"enabled":     false,
 		"identitySaved": false,
-	}
+		"activeForwarders": len(forwarders),
+}
 	if root != nil {
 		state["enabled"] = root.IsEnabled()
 		if root.IsEnabled() {
@@ -181,6 +308,62 @@ func CreateShare(backendMode, shareMode, target string) (string, error) {
 		return "", fmt.Errorf("encode created share: %w", err)
 	}
 	return string(encoded), nil
+}
+
+
+ // StartTCPForwarder accepts connections arriving through a zrok share and
+ // forwards each connection to a TCP service reachable from this Android
+ // device (for example, 127.0.0.1:8080). Use Status() to inspect the active
+ // forwarder count and StopTCPForwarder() to stop it.
+func StartTCPForwarder(shareToken, localAddress string) error {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if root == nil || !root.IsEnabled() {
+		return errors.New("zrok environment is not enabled")
+	}
+	shareToken = strings.TrimSpace(shareToken)
+	if shareToken == "" {
+		return errors.New("share token is required")
+	}
+	if err := validateTCPAddress(localAddress); err != nil {
+		return err
+	}
+	if _, exists := forwarders[shareToken]; exists {
+		return errors.New("a TCP forwarder for this share is already running")
+	}
+
+	listener, err := sdk.NewListener(shareToken, root)
+	if err != nil {
+		return fmt.Errorf("start zrok share listener: %w", err)
+	}
+	forwarder := &tcpForwarder{
+		listener: listener,
+		stop:     make(chan struct{}),
+		conns:    make(map[net.Conn]struct{}),
+	}
+	forwarders[shareToken] = forwarder
+	go forwarder.acceptLoop(localAddress, shareToken)
+	return nil
+}
+
+// StopTCPForwarder stops accepting connections and closes active forwarded
+// connections for the supplied share token.
+func StopTCPForwarder(shareToken string) error {
+	shareToken = strings.TrimSpace(shareToken)
+	if shareToken == "" {
+		return errors.New("share token is required")
+	}
+	mu.Lock()
+	forwarder, exists := forwarders[shareToken]
+	if exists {
+		delete(forwarders, shareToken)
+	}
+	mu.Unlock()
+	if !exists {
+		return errors.New("no TCP forwarder is running for this share")
+	}
+	return forwarder.close()
 }
 
 // DeleteShare removes a previously-created share by its share token.
