@@ -330,7 +330,7 @@ public final class MainActivity extends Activity {
                 String shares = bridge.Bridge.listManagedShares();
                 main.post(() -> {
                     renderState(status, shares);
-                    if (result != null) messageView.setText("PRIVATE SHARE TEST RESULT\n" + result);
+                    if (result != null) messageView.setText("ZROK OPERATION RESULT\n" + result);
                 });
             } catch (Throwable error) {
                 main.post(() -> messageView.setText("Private-share test failed: " + safeMessage(error)));
