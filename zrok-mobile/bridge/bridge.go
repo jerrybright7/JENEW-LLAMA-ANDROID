@@ -262,11 +262,8 @@ func DisableEnvironment() error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if root == nil || !root.IsEnabled() {
-		return errors.New("zrok environment is not enabled")
-	}
-	if len(forwarders) != 0 {
-		return errors.New("stop all active TCP forwarders before disabling zrok")
+	if err := validateDisablePreconditions(root != nil && root.IsEnabled(), len(forwarders)); err != nil {
+		return err
 	}
 
 	environment := root.Environment()
@@ -285,6 +282,16 @@ func DisableEnvironment() error {
 	}
 	if err := root.DeleteEnvironment(); err != nil {
 		return fmt.Errorf("remove local zrok credentials after remote disable: %w", err)
+	}
+	return nil
+}
+
+func validateDisablePreconditions(enabled bool, activeForwarders int) error {
+	if !enabled {
+		return errors.New("zrok environment is not enabled")
+	}
+	if activeForwarders != 0 {
+		return errors.New("stop all active TCP forwarders before disabling zrok")
 	}
 	return nil
 }
