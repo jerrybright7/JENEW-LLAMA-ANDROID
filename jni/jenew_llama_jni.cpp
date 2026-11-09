@@ -149,6 +149,7 @@ Java_com_jenew_smartdc_JenewLlamaNative_nativeGenerate(
             llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
         } else {
             llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
+            llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.9f, 1));
             llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
         }
         std::unique_ptr<llama_sampler, decltype(&llama_sampler_free)> samplerGuard(
