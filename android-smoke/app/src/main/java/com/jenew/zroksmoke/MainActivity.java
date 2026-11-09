@@ -30,7 +30,7 @@ public final class MainActivity extends Activity {
     private LinearLayout rootLayout;
     private TextView statusView, messageView;
     private LinearLayout servicesContainer;
-    private EditText endpointInput, tokenInput, hostInput, targetInput;
+    private EditText endpointInput, tokenInput, hostInput, targetInput, advancedOptionsInput, accessShareInput, accessTokenInput;
     private Spinner backendInput, modeInput;
     private static final String DEFAULT_API = "https://api-v2.zrok.io";
     private static final String[] BACKENDS = {
@@ -99,6 +99,38 @@ public final class MainActivity extends Activity {
         backendInput = addSpinner("Backend type", BACKENDS);
         modeInput = addSpinner("Share visibility", MODES);
         targetInput = addInput("Backend target", "127.0.0.1:8080", false);
+        advancedOptionsInput = addInput("Advanced share options (JSON)", "{\\"backendMode\\":\\"web\\",\\"shareMode\\":\\"private\\",\\"target\\":\\"./public\\",\\"permissionMode\\":\\"open\\"}", false);
+        advancedOptionsInput.setSingleLine(false);
+        advancedOptionsInput.setMinLines(3);
+        advancedOptionsInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        addButton("CREATE SHARE WITH ADVANCED OPTIONS", () -> {
+            final String options = value(advancedOptionsInput);
+            runTask("Creating advanced zrok share…", () -> {
+                bridge.Bridge.createShareWithOptions(options);
+                return null;
+            });
+        });
+
+        addSection("PRIVATE ACCESS");
+        accessShareInput = addInput("Private share token to access", "", false);
+        addButton("CREATE PRIVATE ACCESS GRANT", () -> {
+            final String share = value(accessShareInput);
+            runTaskWithResult("Creating private access grant…", () ->
+                bridge.Bridge.createAccessGrant(share, ""));
+        });
+        accessTokenInput = addInput("Access token to revoke", "", true);
+        accessTokenInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        addButton("REVOKE PRIVATE ACCESS GRANT", () -> {
+            final String access = value(accessTokenInput);
+            confirm("Revoke private access?", "This revokes the selected access grant at the zrok controller.", () ->
+                runTask("Revoking private access…", () -> {
+                    bridge.Bridge.deleteAccessGrant(access);
+                    accessTokenInput.setText("");
+                    return null;
+                }));
+        });
+        addButton("REFRESH PRIVATE ACCESS LIST", () -> runTaskWithResult(
+            "Loading private accesses…", () -> bridge.Bridge.listManagedAccesses()));
         addButton("CREATE ZROK SHARE", () -> {
             final String backend = backendInput.getSelectedItem().toString();
             final String mode = modeInput.getSelectedItem().toString();
