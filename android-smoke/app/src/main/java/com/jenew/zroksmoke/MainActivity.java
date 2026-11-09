@@ -45,6 +45,9 @@ public final class MainActivity extends Activity {
         go.Seq.setContext(getApplicationContext());
         try {
             bridge.Bridge.initialize(getFilesDir().getAbsolutePath() + "/zrok2");
+            new java.io.File(getFilesDir(), "public").mkdirs();
+            new java.io.File(getFilesDir(), "drive").mkdirs();
+            new java.io.File(getFilesDir(), "drive-files").mkdirs();
         } catch (Throwable error) {
             showFatal("Could not initialize private zrok storage: " + safeMessage(error));
             return;
@@ -105,7 +108,7 @@ public final class MainActivity extends Activity {
         backendInput = addSpinner("Backend type", BACKENDS);
         modeInput = addSpinner("Share visibility", MODES);
         targetInput = addInput("Backend target", "127.0.0.1:8080", false);
-        advancedOptionsInput = addInput("Advanced share options (JSON)", "{\\"backendMode\\":\\"web\\",\\"shareMode\\":\\"private\\",\\"target\\":\\"./public\\",\\"permissionMode\\":\\"open\\"}", false);
+        advancedOptionsInput = addInput("Advanced share options (JSON)", "{\\"backendMode\\":\\"web\\",\\"shareMode\\":\\"private\\",\\"target\\":\\"" + getFilesDir().getAbsolutePath() + "/public\\",\\"permissionMode\\":\\"open\\"}", false);
         advancedOptionsInput.setSingleLine(false);
         advancedOptionsInput.setMinLines(3);
         advancedOptionsInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
