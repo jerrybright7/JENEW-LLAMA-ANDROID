@@ -16,8 +16,10 @@ jobs:
       ZROK_LIVE_ACCOUNT_TOKEN: ${{ secrets.ZROK_LIVE_ACCOUNT_TOKEN }}
       ZROK_LIVE_HOST: ${{ secrets.ZROK_LIVE_HOST }}
     steps:
-      - name: Checkout prototype
+      - name: Checkout prototype source branch
         uses: actions/checkout@v4
+        with:
+          ref: zrok-gomobile-prototype
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
