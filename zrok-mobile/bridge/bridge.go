@@ -538,7 +538,7 @@ func TestPrivateShare(shareToken string) (string, error) {
 	if err := conn.SetDeadline(time.Now().Add(25 * time.Second)); err != nil {
 		return "", fmt.Errorf("set private-share test deadline: %w", err)
 	}
-	if _, err := io.WriteString(conn, "GET / HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n"); err != nil {
+	if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
 		return "", fmt.Errorf("send HTTP request through private share: %w", err)
 	}
 	response, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodGet})
@@ -550,7 +550,7 @@ func TestPrivateShare(shareToken string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read private-share response body: %w", err)
 	}
-	return fmt.Sprintf("HTTP %s\\n\\n%s", response.Status, strings.TrimSpace(string(body))), nil
+	return fmt.Sprintf("HTTP %s\n\n%s", response.Status, strings.TrimSpace(string(body))), nil
 }
 
 // StopTCPForwarder stops accepting connections and closes active forwarded
