@@ -340,7 +340,7 @@ func DisableEnvironment() error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if err := validateDisablePreconditions(root != nil && root.IsEnabled(), len(forwarders)+ActiveBackendCount()); err != nil {
+	if err := validateDisablePreconditions(root != nil && root.IsEnabled(), len(forwarders)+int(ActiveBackendCount())); err != nil {
 		return err
 	}
 
