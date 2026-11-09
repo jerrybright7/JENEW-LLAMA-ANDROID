@@ -184,6 +184,11 @@ public final class MainActivity extends Activity {
             return null;
         }));
         servicesContainer.addView(toggle, new LinearLayout.LayoutParams(-1, dp(48)));
+        Button test = new Button(this);
+        test.setText("TEST PRIVATE SHARE");
+        test.setOnClickListener(v -> runTaskWithResult("Testing private share traffic…",
+            () -> bridge.Bridge.testPrivateShare(shareToken)));
+        servicesContainer.addView(test, new LinearLayout.LayoutParams(-1, dp(48)));
         Button delete = new Button(this);
         delete.setText("DELETE SHARE");
         delete.setOnClickListener(v -> runTask("Deleting share…", () -> {
@@ -205,6 +210,23 @@ public final class MainActivity extends Activity {
                 main.post(() -> renderState(status, shares));
             } catch (Throwable error) {
                 main.post(() -> messageView.setText("Operation failed: " + safeMessage(error)));
+            }
+        });
+    }
+
+    private void runTaskWithResult(String label, Work work) {
+        messageView.setText(label);
+        worker.execute(() -> {
+            try {
+                Object result = work.run();
+                String status = bridge.Bridge.status();
+                String shares = bridge.Bridge.listManagedShares();
+                main.post(() -> {
+                    renderState(status, shares);
+                    if (result != null) messageView.setText("PRIVATE SHARE TEST PASSED\\n" + result);
+                });
+            } catch (Throwable error) {
+                main.post(() -> messageView.setText("Private-share test failed: " + safeMessage(error)));
             }
         });
     }
