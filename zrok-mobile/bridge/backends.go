@@ -119,6 +119,7 @@ func StartShareBackend(shareToken, backendMode, target string) error {
 
 	mu.Lock()
 	share.Running = true
+	share.AutoStart = true
 	managedShares[shareToken] = share
 	persistErr := persistManagedSharesLocked()
 	mu.Unlock()
@@ -167,6 +168,7 @@ func StopShareBackend(shareToken string) error {
 	mu.Lock()
 	if share, ok := managedShares[shareToken]; ok {
 		share.Running = false
+		share.AutoStart = false
 		managedShares[shareToken] = share
 		_ = persistManagedSharesLocked()
 	}
