@@ -144,8 +144,8 @@ func StopTCPAccessForwarder(shareToken string) error {
 	return f.close()
 }
 
-func ActiveAccessForwarderCount() int {
+func ActiveAccessForwarderCount() int32 {
 	backendMu.Lock()
 	defer backendMu.Unlock()
-	return len(accessForwarders)
+	return int32(len(accessForwarders))
 }
