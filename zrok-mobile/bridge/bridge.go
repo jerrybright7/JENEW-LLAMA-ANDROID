@@ -9,8 +9,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -258,11 +258,11 @@ func Status() string {
 	defer mu.Unlock()
 
 	state := map[string]interface{}{
-		"initialized": root != nil,
-		"enabled":     false,
-		"identitySaved": false,
+		"initialized":      root != nil,
+		"enabled":          false,
+		"identitySaved":    false,
 		"activeForwarders": len(forwarders),
-}
+	}
 	if root != nil {
 		state["enabled"] = root.IsEnabled()
 		if root.IsEnabled() {
@@ -311,7 +311,7 @@ func CreateShare(backendMode, shareMode, target string) (string, error) {
 }
 
 
- // StartTCPForwarder accepts connections arriving through a zrok share and
+// StartTCPForwarder accepts connections arriving through a zrok share and
  // forwards each connection to a TCP service reachable from this Android
  // device (for example, 127.0.0.1:8080). Use Status() to inspect the active
  // forwarder count and StopTCPForwarder() to stop it.
