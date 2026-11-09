@@ -24,7 +24,7 @@ public final class MainActivity extends Activity {
             bridge.Bridge.touch();
             String result = bridge.Bridge.sdkCompileProbe();
 
-            if (result == null || !result.contains("zrok SDK v2 bridge compiled")) {
+            if (result == null || !result.contains("zrok SDK v2 bridge ready")) {
                 throw new IllegalStateException("Unexpected bridge response: " + result);
             }
 
