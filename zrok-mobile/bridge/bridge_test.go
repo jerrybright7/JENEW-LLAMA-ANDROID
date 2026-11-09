@@ -60,3 +60,27 @@ func TestValidateAPIEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateTCPAddress(t *testing.T) {
+	for _, address := range []string{
+		"127.0.0.1:8080",
+		"localhost:443",
+		"[::1]:9000",
+	} {
+		if err := validateTCPAddress(address); err != nil {
+			t.Errorf("%q rejected: %v", address, err)
+		}
+	}
+	for _, address := range []string{
+		"",
+		"localhost",
+		":8080",
+		"localhost:0",
+		"localhost:65536",
+		"localhost:http",
+	} {
+		if err := validateTCPAddress(address); err == nil {
+			t.Errorf("%q unexpectedly accepted", address)
+		}
+	}
+}
