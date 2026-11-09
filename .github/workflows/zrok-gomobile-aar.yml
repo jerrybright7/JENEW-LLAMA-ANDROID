@@ -97,6 +97,49 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Build a debug APK for installation on a real Android device. This does not
+  # start or depend on an emulator; it only compiles and packages the app.
+  build-control-apk:
+    needs: build-aar
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout isolated Android control app
+        uses: actions/checkout@v4
+
+      - name: Download freshly built zrok AAR
+        uses: actions/download-artifact@v4
+        with:
+          name: JENEW-ZROK-GOMOBILE-AAR-PROTOTYPE
+          path: android-smoke/app/libs
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Build installable debug APK
+        run: |
+          set -euo pipefail
+          test -s android-smoke/app/libs/jenew-zrok-sdk.aar
+          gradle -p android-smoke --no-daemon assembleDebug
+          test -s android-smoke/app/build/outputs/apk/debug/app-debug.apk
+          sha256sum android-smoke/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload Android control APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: JENEW-ZROK-ANDROID-CONTROL-APK
+          path: android-smoke/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
   # Runtime testing is deliberately opt-in: ADB/emulator availability must not
   # block the primary Go SDK + Android AAR build.
   emulator-smoke-test:
