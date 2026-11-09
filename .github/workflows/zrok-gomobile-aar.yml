@@ -8,6 +8,7 @@ on:
     paths:
       - ".github/workflows/zrok-gomobile-aar.yml"
       - "zrok-mobile/**"
+      - "android-smoke/**"
 
 permissions:
   contents: read
@@ -72,4 +73,58 @@ jobs:
           name: JENEW-ZROK-GOMOBILE-AAR-PROTOTYPE
           path: output/jenew-zrok-sdk.aar
           if-no-files-found: error
+          retention-days: 14
+
+  emulator-smoke-test:
+    needs: build-aar
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout isolated smoke-test app
+        uses: actions/checkout@v4
+
+      - name: Download freshly built zrok AAR
+        uses: actions/download-artifact@v4
+        with:
+          name: JENEW-ZROK-GOMOBILE-AAR-PROTOTYPE
+          path: android-smoke/app/libs
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Build isolated Android smoke-test APK
+        run: |
+          set -euo pipefail
+          test -s android-smoke/app/libs/jenew-zrok-sdk.aar
+          gradle -p android-smoke --no-daemon assembleDebug
+
+      - name: Boot Android 15 emulator and test Go/JNI bridge
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
+          disable-animations: true
+          script: bash android-smoke/run-emulator-smoke.sh
+
+      - name: Upload emulator logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: JENEW-ZROK-ANDROID-EMULATOR-LOGS
+          path: |
+            android-smoke/zrok-smoke.log
+            android-smoke/logcat-full.txt
+          if-no-files-found: ignore
           retention-days: 14
