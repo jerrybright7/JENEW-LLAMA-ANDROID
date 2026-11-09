@@ -1,18 +1,26 @@
 package com.jenew.zroksmoke;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -20,11 +28,15 @@ public final class MainActivity extends Activity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private LinearLayout rootLayout;
-    private TextView statusView;
-    private TextView messageView;
+    private TextView statusView, messageView;
     private LinearLayout servicesContainer;
     private EditText endpointInput, tokenInput, hostInput, targetInput;
+    private Spinner backendInput, modeInput;
     private static final String DEFAULT_API = "https://api-v2.zrok.io";
+    private static final String[] BACKENDS = {
+        "tcpTunnel", "web", "proxy", "udpTunnel", "caddy", "drive", "socks"
+    };
+    private static final String[] MODES = {"private", "public"};
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -73,18 +85,26 @@ public final class MainActivity extends Activity {
             final String token = value(tokenInput);
             final String host = value(hostInput);
             tokenInput.setText("");
+            if (token.isEmpty()) {
+                messageView.setText("Enter your zrok account token first.");
+                return;
+            }
             runTask("Enabling zrok environment…", () -> {
                 bridge.Bridge.enableEnvironment(endpoint, token, host, "JENEW Android zrok control");
                 return null;
             });
         });
 
-        addSection("CREATE TCP SERVICE");
-        targetInput = addInput("Local target (host:port)", "127.0.0.1:8080", false);
-        addButton("CREATE PRIVATE TCP SHARE", () -> {
+        addSection("CREATE SHARE");
+        backendInput = addSpinner("Backend type", BACKENDS);
+        modeInput = addSpinner("Share visibility", MODES);
+        targetInput = addInput("Backend target", "127.0.0.1:8080", false);
+        addButton("CREATE ZROK SHARE", () -> {
+            final String backend = backendInput.getSelectedItem().toString();
+            final String mode = modeInput.getSelectedItem().toString();
             final String target = value(targetInput);
-            runTask("Creating private TCP share…", () -> {
-                bridge.Bridge.createShare("tcpTunnel", "private", target);
+            runTask("Creating " + mode + " " + backend + " share…", () -> {
+                bridge.Bridge.createShare(backend, mode, target);
                 return null;
             });
         });
@@ -94,11 +114,14 @@ public final class MainActivity extends Activity {
         servicesContainer = new LinearLayout(this);
         servicesContainer.setOrientation(LinearLayout.VERTICAL);
         rootLayout.addView(servicesContainer);
-        addButton("DISABLE ENVIRONMENT", () ->
-            runTask("Disabling environment…", () -> {
+        addButton("DISABLE ENVIRONMENT", () -> confirm(
+            "Disable zrok environment?",
+            "This removes the local zrok identity and credentials after the controller confirms the disable. Stop all forwarders first.",
+            () -> runTask("Disabling environment…", () -> {
                 bridge.Bridge.disableEnvironment();
                 return null;
-            }));
+            })
+        ));
     }
 
     private EditText addInput(String hint, String initial, boolean password) {
@@ -109,6 +132,21 @@ public final class MainActivity extends Activity {
         input.setTextSize(14);
         rootLayout.addView(input, new LinearLayout.LayoutParams(-1, dp(52)));
         return input;
+    }
+
+    private Spinner addSpinner(String label, String[] values) {
+        TextView caption = new TextView(this);
+        caption.setText(label);
+        caption.setTextSize(13);
+        caption.setPadding(0, dp(8), 0, 0);
+        rootLayout.addView(caption);
+        Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(
+            this, android.R.layout.simple_spinner_item, values);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        rootLayout.addView(spinner, new LinearLayout.LayoutParams(-1, dp(48)));
+        return spinner;
     }
 
     private void addSection(String label) {
@@ -144,58 +182,95 @@ public final class MainActivity extends Activity {
             JSONObject status = new JSONObject(statusJson);
             statusView.setText("Initialized: " + status.optBoolean("initialized")
                 + "   •   Enabled: " + status.optBoolean("enabled")
+                + "   •   Identity saved: " + status.optBoolean("identitySaved")
                 + "   •   Active forwarders: " + status.optInt("activeForwarders")
-                + "   •   Managed: " + status.optInt("managedShares"));
+                + "   •   Managed: " + status.optInt("managedShares")
+                + (status.has("apiEndpoint") ? "\nAPI: " + status.optString("apiEndpoint") : ""));
             JSONArray shares = new JSONArray(sharesJson);
             servicesContainer.removeAllViews();
-            for (int i = 0; i < shares.length(); i++) {
-                JSONObject share = shares.getJSONObject(i);
-                addServiceRow(share);
-            }
-            messageView.setText("State refreshed. Share tokens remain inside the app UI and private registry.");
+            for (int i = 0; i < shares.length(); i++) addServiceRow(shares.getJSONObject(i));
+            messageView.setText("State refreshed. Credentials and share tokens are kept inside app-private storage.");
         } catch (Throwable error) {
             messageView.setText("Could not render service list: " + safeMessage(error));
         }
     }
 
-    private View findSection(String label) {
-        for (int i = 0; i < rootLayout.getChildCount(); i++) {
-            View view = rootLayout.getChildAt(i);
-            if (view instanceof TextView && label.contentEquals(((TextView) view).getText())) return view;
-        }
-        return null;
-    }
-
     private void addServiceRow(JSONObject share) {
         final String shareToken = share.optString("shareToken");
         final String target = share.optString("target");
+        final String backend = share.optString("backendMode");
+        final String mode = share.optString("shareMode");
         final boolean running = share.optBoolean("running");
+        JSONArray endpointArray = share.optJSONArray("frontendEndpoints");
+        final List<String> endpoints = new ArrayList<>();
+        if (endpointArray != null) {
+            for (int i = 0; i < endpointArray.length(); i++) {
+                String endpoint = endpointArray.optString(i);
+                if (endpoint != null && !endpoint.isEmpty()) endpoints.add(endpoint);
+            }
+        }
+
         TextView info = new TextView(this);
-        info.setText((running ? "● RUNNING" : "○ STOPPED") + "  " + target
-            + "\n" + share.optString("backendMode") + " / " + share.optString("shareMode"));
+        StringBuilder details = new StringBuilder();
+        details.append((running ? "● RUNNING" : "○ STOPPED"))
+            .append("  ").append(backend).append(" / ").append(mode)
+            .append("\nTarget: ").append(target);
+        if (!endpoints.isEmpty()) details.append("\nFrontend: ").append(endpoints.get(0));
+        info.setText(details.toString());
         info.setTextSize(14);
-        info.setPadding(0, dp(12), 0, dp(4));
+        info.setPadding(0, dp(14), 0, dp(4));
         servicesContainer.addView(info);
-        Button toggle = new Button(this);
-        toggle.setText(running ? "STOP FORWARDER" : "START FORWARDER");
-        toggle.setOnClickListener(v -> runTask(running ? "Stopping…" : "Starting…", () -> {
-            if (running) bridge.Bridge.stopTCPForwarder(shareToken);
-            else bridge.Bridge.startTCPForwarder(shareToken, target);
-            return null;
-        }));
-        servicesContainer.addView(toggle, new LinearLayout.LayoutParams(-1, dp(48)));
-        Button test = new Button(this);
-        test.setText("TEST PRIVATE SHARE");
-        test.setOnClickListener(v -> runTaskWithResult("Testing private share traffic…",
-            () -> bridge.Bridge.testPrivateShare(shareToken)));
-        servicesContainer.addView(test, new LinearLayout.LayoutParams(-1, dp(48)));
+
+        if (!endpoints.isEmpty()) {
+            Button copyEndpoint = new Button(this);
+            copyEndpoint.setText("COPY FRONTEND ENDPOINT");
+            copyEndpoint.setOnClickListener(v -> {
+                ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                clipboard.setPrimaryClip(ClipData.newPlainText("zrok frontend endpoint", endpoints.get(0)));
+                messageView.setText("Frontend endpoint copied to clipboard.");
+            });
+            servicesContainer.addView(copyEndpoint, new LinearLayout.LayoutParams(-1, dp(46)));
+        }
+
+        if ("tcpTunnel".equals(backend)) {
+            Button toggle = new Button(this);
+            toggle.setText(running ? "STOP FORWARDER" : "START FORWARDER");
+            toggle.setOnClickListener(v -> runTask(running ? "Stopping forwarder…" : "Starting forwarder…", () -> {
+                if (running) bridge.Bridge.stopTCPForwarder(shareToken);
+                else bridge.Bridge.startTCPForwarder(shareToken, target);
+                return null;
+            }));
+            servicesContainer.addView(toggle, new LinearLayout.LayoutParams(-1, dp(48)));
+
+            if ("private".equals(mode)) {
+                Button test = new Button(this);
+                test.setText("TEST PRIVATE SHARE");
+                test.setOnClickListener(v -> runTaskWithResult("Testing private share traffic…",
+                    () -> bridge.Bridge.testPrivateShare(shareToken)));
+                servicesContainer.addView(test, new LinearLayout.LayoutParams(-1, dp(48)));
+            }
+        }
+
         Button delete = new Button(this);
         delete.setText("DELETE SHARE");
-        delete.setOnClickListener(v -> runTask("Deleting share…", () -> {
-            bridge.Bridge.deleteShare(shareToken);
-            return null;
-        }));
+        delete.setOnClickListener(v -> confirm(
+            "Delete this zrok share?",
+            "This removes the share from the zrok account. Stop its forwarder first if it is running.",
+            () -> runTask("Deleting share…", () -> {
+                bridge.Bridge.deleteShare(shareToken);
+                return null;
+            })
+        ));
         servicesContainer.addView(delete, new LinearLayout.LayoutParams(-1, dp(48)));
+    }
+
+    private void confirm(String title, String message, Runnable accepted) {
+        new AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setNegativeButton("CANCEL", (dialog, which) -> dialog.dismiss())
+            .setPositiveButton("CONTINUE", (dialog, which) -> accepted.run())
+            .show();
     }
 
     private interface Work { Object run() throws Exception; }
@@ -223,7 +298,7 @@ public final class MainActivity extends Activity {
                 String shares = bridge.Bridge.listManagedShares();
                 main.post(() -> {
                     renderState(status, shares);
-                    if (result != null) messageView.setText("PRIVATE SHARE TEST PASSED\\n" + result);
+                    if (result != null) messageView.setText("PRIVATE SHARE TEST RESULT\n" + result);
                 });
             } catch (Throwable error) {
                 main.post(() -> messageView.setText("Private-share test failed: " + safeMessage(error)));
