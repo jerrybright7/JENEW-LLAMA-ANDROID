@@ -1,5 +1,9 @@
 name: JENEW zrok Go SDK Android AAR Prototype
 
+concurrency:
+  group: zrok-android-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
     inputs:
