@@ -41,3 +41,25 @@ This module wraps the zrok v2.0.9 Go SDK for Android through gomobile.
   separately authorized runtime test.
 - This prototype is separate from the JENEW Android application and does not
   modify its MQTT broker or lifecycle.
+
+
+## Expanded mobile API surface
+
+The bridge also exposes advanced share creation through
+`Bridge.createShareWithOptions(optionsJSON)`. Its JSON options map to the zrok
+SDK share request, including Basic Auth, OAuth provider/domain restrictions,
+permission mode, access grants, private-share token selection, and reserved
+namespace/name selections. The JSON interface is intentional: it avoids binding
+Go request structs through gomobile.
+
+Private access grants can be created, listed, and revoked with
+`Bridge.createAccessGrant(shareToken, bindAddress)`,
+`Bridge.listManagedAccesses()`, and
+`Bridge.deleteAccessGrant(accessToken)`. The access registry is stored with
+owner-only permissions. Access tokens and share tokens are secrets: never log
+these API results or send them to analytics.
+
+`Bridge.getShareDetail(shareToken)` retrieves controller-side share metadata.
+These additions provide access and share-management primitives; they do not by
+themselves claim that every backend forwarding engine or Android background
+service is implemented. Backend runtime support must be verified independently.
