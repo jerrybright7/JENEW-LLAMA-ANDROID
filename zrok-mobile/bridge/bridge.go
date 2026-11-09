@@ -423,6 +423,9 @@ func DeleteShare(shareToken string) error {
 	if shareToken == "" {
 		return errors.New("share token is required")
 	}
+	if _, active := forwarders[shareToken]; active {
+		return errors.New("stop the TCP forwarder before deleting its share")
+	}
 	if err := sdk.DeleteShare(root, &sdk.Share{Token: shareToken}); err != nil {
 		return fmt.Errorf("delete zrok share: %w", err)
 	}
@@ -435,6 +438,11 @@ func buildShareRequest(backendMode, shareMode, target string) (*sdk.ShareRequest
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return nil, errors.New("share target is required")
+	}
+	if backendMode == string(sdk.TcpTunnelBackendMode) {
+		if err := validateTCPAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid TCP tunnel target: %w", err)
+		}
 	}
 
 	backend := sdk.BackendMode(backendMode)
