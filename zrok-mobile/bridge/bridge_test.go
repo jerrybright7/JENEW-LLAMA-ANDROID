@@ -84,3 +84,25 @@ func TestValidateTCPAddress(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateDisablePreconditions(t *testing.T) {
+	cases := []struct {
+		name             string
+		enabled          bool
+		activeForwarders int
+		wantError        bool
+	}{
+		{name: "enabled and idle", enabled: true, activeForwarders: 0},
+		{name: "not enabled", enabled: false, activeForwarders: 0, wantError: true},
+		{name: "active listener", enabled: true, activeForwarders: 1, wantError: true},
+		{name: "multiple active listeners", enabled: true, activeForwarders: 3, wantError: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateDisablePreconditions(tc.enabled, tc.activeForwarders)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("error = %v, wantError = %v", err, tc.wantError)
+			}
+		})
+	}
+}
