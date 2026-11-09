@@ -264,23 +264,21 @@ public final class MainActivity extends Activity {
             servicesContainer.addView(copyEndpoint, new LinearLayout.LayoutParams(-1, dp(46)));
         }
 
-        if ("tcpTunnel".equals(backend)) {
-            Button toggle = new Button(this);
-            toggle.setText(running ? "STOP FORWARDER" : "START FORWARDER");
-            toggle.setOnClickListener(v -> runTask(running ? "Stopping forwarder…" : "Starting forwarder…", () -> {
-                if (running) bridge.Bridge.stopTCPForwarder(shareToken);
-                else bridge.Bridge.startTCPForwarder(shareToken, target);
-                return null;
-            }));
-            servicesContainer.addView(toggle, new LinearLayout.LayoutParams(-1, dp(48)));
+        Button engineToggle = new Button(this);
+        engineToggle.setText(running ? "STOP " + backend.toUpperCase() + " ENGINE" : "START " + backend.toUpperCase() + " ENGINE");
+        engineToggle.setOnClickListener(v -> runTask(running ? "Stopping " + backend + " engine…" : "Starting " + backend + " engine…", () -> {
+            if (running) bridge.Bridge.stopShareBackend(shareToken);
+            else bridge.Bridge.startShareBackend(shareToken, backend, target);
+            return null;
+        }));
+        servicesContainer.addView(engineToggle, new LinearLayout.LayoutParams(-1, dp(48)));
 
-            if ("private".equals(mode)) {
-                Button test = new Button(this);
-                test.setText("TEST PRIVATE SHARE");
-                test.setOnClickListener(v -> runTaskWithResult("Testing private share traffic…",
-                    () -> bridge.Bridge.testPrivateShare(shareToken)));
-                servicesContainer.addView(test, new LinearLayout.LayoutParams(-1, dp(48)));
-            }
+        if ("tcpTunnel".equals(backend) && "private".equals(mode)) {
+            Button test = new Button(this);
+            test.setText("TEST PRIVATE SHARE");
+            test.setOnClickListener(v -> runTaskWithResult("Testing private share traffic…",
+                () -> bridge.Bridge.testPrivateShare(shareToken)));
+            servicesContainer.addView(test, new LinearLayout.LayoutParams(-1, dp(48)));
         }
 
         Button delete = new Button(this);
