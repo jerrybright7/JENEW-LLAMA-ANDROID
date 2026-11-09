@@ -2,6 +2,12 @@ name: JENEW zrok Go SDK Android AAR Prototype
 
 on:
   workflow_dispatch:
+    inputs:
+      run_emulator_smoke:
+        description: "Also run the optional Android emulator/JNI runtime smoke test"
+        required: false
+        type: boolean
+        default: false
   push:
     branches:
       - zrok-gomobile-prototype
@@ -75,7 +81,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Runtime testing is deliberately opt-in: ADB/emulator availability must not
+  # block the primary Go SDK + Android AAR build.
   emulator-smoke-test:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_emulator_smoke }}
     needs: build-aar
     runs-on: ubuntu-24.04
     timeout-minutes: 45
