@@ -36,6 +36,18 @@ public final class ZrokForegroundService extends Service {
             .setCategory(Notification.CATEGORY_SERVICE)
             .build();
         startForeground(NOTIFICATION_ID, notification);
+        new Thread(() -> {
+            try {
+                go.Seq.setContext(getApplicationContext());
+                bridge.Bridge.initialize(getFilesDir().getAbsolutePath() + "/zrok2");
+                if (bridge.Bridge.activeBackendCount() == 0) {
+                    bridge.Bridge.restoreManagedBackends();
+                }
+            } catch (Throwable ignored) {
+                // Keep the foreground notification visible; the app can show
+                // the detailed recovery error on its next foreground refresh.
+            }
+        }, "JENEW-zrok-restore").start();
         return START_STICKY;
     }
 
