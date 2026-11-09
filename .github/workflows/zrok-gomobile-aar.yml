@@ -25,7 +25,7 @@ jobs:
         with:
           go-version: "1.27.3"
           cache: true
-          cache-dependency-path: zrok-mobile/go.sum
+          cache-dependency-path: zrok-mobile/go.mod
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
