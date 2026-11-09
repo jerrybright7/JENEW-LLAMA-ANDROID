@@ -171,3 +171,36 @@ func TestListManagedSharesReturnsEveryService(t *testing.T) {
 		t.Fatalf("listed %d services, want 2", len(listed))
 	}
 }
+
+
+func TestPrivateAccessRegistryIsOwnerOnlyAndReloadable(t *testing.T) {
+	oldPath, oldAccesses := accessRegistryPath, managedAccesses
+	defer func() { accessRegistryPath, managedAccesses = oldPath, oldAccesses }()
+	dir := t.TempDir()
+	shareRegistryPath = filepath.Join(dir, "managed-shares.json")
+	accessRegistryPath = ""
+	managedAccesses = map[string]managedAccess{
+		"frontend-secret": {
+			ShareToken: "share-secret", AccessToken: "frontend-secret",
+			BackendMode: "tcpTunnel", CreatedAt: "2026-11-09T00:00:00Z",
+		},
+	}
+	if err := persistAccessesLocked(); err != nil {
+		t.Fatalf("persist access registry: %v", err)
+	}
+	info, err := os.Stat(accessRegistryPath)
+	if err != nil {
+		t.Fatalf("stat access registry: %v", err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("access registry permissions = %o, want 600", info.Mode().Perm())
+	}
+	managedAccesses = nil
+	accessRegistryPath = ""
+	if err := ensureAccessRegistryLocked(); err != nil {
+		t.Fatalf("reload access registry: %v", err)
+	}
+	if len(managedAccesses) != 1 || managedAccesses["frontend-secret"].ShareToken != "share-secret" {
+		t.Fatalf("access registry did not reload: %#v", managedAccesses)
+	}
+}
