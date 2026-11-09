@@ -32,7 +32,7 @@ public final class MainActivity extends Activity {
     private LinearLayout rootLayout;
     private TextView statusView, messageView;
     private LinearLayout servicesContainer;
-    private EditText endpointInput, tokenInput, hostInput, targetInput, advancedOptionsInput, accessShareInput, accessTokenInput, accessBindInput;
+    private EditText endpointInput, tokenInput, hostInput, targetInput, advancedOptionsInput, accessShareInput, accessTokenInput, accessBindInput, driveShareInput, driveRemoteInput, driveLocalInput, driveDestinationInput;
     private Spinner backendInput, modeInput;
     private static final String DEFAULT_API = "https://api-v2.zrok.io";
     private static final String[] BACKENDS = {
@@ -156,6 +156,39 @@ public final class MainActivity extends Activity {
         });
         addButton("REFRESH PRIVATE ACCESS LIST", () -> runTaskWithResult(
             "Loading private accesses…", () -> bridge.Bridge.listManagedAccesses()));
+
+        addSection("ZROK DRIVE FILE OPERATIONS");
+        driveShareInput = addInput("Drive share token", "", false);
+        driveRemoteInput = addInput("Remote Drive path", "/", false);
+        driveLocalInput = addInput("Local app-private path (relative)", "downloads/file.bin", false);
+        driveDestinationInput = addInput("Remote destination path", "/backup/file.bin", false);
+        addButton("LIST DRIVE DIRECTORY", () -> runTaskWithResult("Listing remote Drive files…",
+            () -> bridge.Bridge.driveList(value(driveShareInput), value(driveRemoteInput), false)));
+        addButton("DOWNLOAD FROM DRIVE", () -> runTask("Downloading from Drive…", () -> {
+            bridge.Bridge.driveDownload(value(driveShareInput), value(driveRemoteInput), value(driveLocalInput));
+            return null;
+        }));
+        addButton("UPLOAD TO DRIVE", () -> runTask("Uploading to Drive…", () -> {
+            bridge.Bridge.driveUpload(value(driveShareInput), value(driveLocalInput), value(driveRemoteInput));
+            return null;
+        }));
+        addButton("CREATE DRIVE DIRECTORY", () -> runTask("Creating remote Drive directory…", () -> {
+            bridge.Bridge.driveMkdir(value(driveShareInput), value(driveRemoteInput));
+            return null;
+        }));
+        addButton("COPY DRIVE ITEM", () -> runTask("Copying remote Drive item…", () -> {
+            bridge.Bridge.driveCopy(value(driveShareInput), value(driveRemoteInput), value(driveDestinationInput), true);
+            return null;
+        }));
+        addButton("MOVE DRIVE ITEM", () -> runTask("Moving remote Drive item…", () -> {
+            bridge.Bridge.driveMove(value(driveShareInput), value(driveRemoteInput), value(driveDestinationInput), true);
+            return null;
+        }));
+        addButton("DELETE DRIVE ITEM", () -> confirm("Delete Drive item?", "This permanently removes the selected remote file or directory.", () ->
+            runTask("Deleting remote Drive item…", () -> {
+                bridge.Bridge.driveRemove(value(driveShareInput), value(driveRemoteInput));
+                return null;
+            })));
         addButton("CREATE ZROK SHARE", () -> {
             final String backend = backendInput.getSelectedItem().toString();
             final String mode = modeInput.getSelectedItem().toString();
