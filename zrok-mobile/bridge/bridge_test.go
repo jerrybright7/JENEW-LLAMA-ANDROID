@@ -27,6 +27,8 @@ func TestBuildShareRequestRejectsInvalidInput(t *testing.T) {
 		name, backend, mode, target string
 	}{
 		{"empty target", "tcpTunnel", "public", ""},
+		{"invalid TCP target", "tcpTunnel", "public", "localhost"},
+		{"invalid TCP port", "tcpTunnel", "public", "127.0.0.1:70000"},
 		{"unknown backend", "shell", "public", "127.0.0.1:8080"},
 		{"unknown share mode", "tcpTunnel", "internet", "127.0.0.1:8080"},
 	}
@@ -82,5 +84,27 @@ func TestValidateTCPAddress(t *testing.T) {
 		if err := validateTCPAddress(address); err == nil {
 			t.Errorf("%q unexpectedly accepted", address)
 		}
+	}
+}
+
+func TestValidateDisablePreconditions(t *testing.T) {
+	cases := []struct {
+		name             string
+		enabled          bool
+		activeForwarders int
+		wantError        bool
+	}{
+		{name: "enabled and idle", enabled: true, activeForwarders: 0},
+		{name: "not enabled", enabled: false, activeForwarders: 0, wantError: true},
+		{name: "active listener", enabled: true, activeForwarders: 1, wantError: true},
+		{name: "multiple active listeners", enabled: true, activeForwarders: 3, wantError: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateDisablePreconditions(tc.enabled, tc.activeForwarders)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("error = %v, wantError = %v", err, tc.wantError)
+			}
+		})
 	}
 }

@@ -159,6 +159,9 @@ func Initialize(privateAppDirectory string) error {
 		return errors.New("zrok root must be a non-empty absolute app-private path")
 	}
 	privateAppDirectory = filepath.Clean(privateAppDirectory)
+	if root != nil && root.Metadata() != nil && root.Metadata().RootPath != privateAppDirectory && len(forwarders) > 0 {
+		return errors.New("cannot switch zrok storage roots while TCP forwarders are active")
+	}
 	if err := os.MkdirAll(privateAppDirectory, 0700); err != nil {
 		return fmt.Errorf("create private zrok directory: %w", err)
 	}
@@ -247,6 +250,48 @@ func EnableEnvironment(apiEndpoint, accountToken, host, description string) erro
 		_ = sdk.DisableEnvironment(enabled, root)
 		_ = root.DeleteEnvironment()
 		return fmt.Errorf("persist enabled zrok environment: %w", err)
+	}
+	return nil
+}
+
+// DisableEnvironment asks the zrok controller to disable this environment,
+// then removes the local identity and credential-bearing environment file.
+// It refuses to run while listeners are active so callers cannot strand
+// forwarding goroutines or invalidate their identity underneath them.
+func DisableEnvironment() error {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if err := validateDisablePreconditions(root != nil && root.IsEnabled(), len(forwarders)); err != nil {
+		return err
+	}
+
+	environment := root.Environment()
+	if err := sdk.DisableEnvironment(&sdk.Environment{
+		ZitiIdentity: environment.ZitiIdentity,
+	}, root); err != nil {
+		return fmt.Errorf("disable zrok environment: %w", err)
+	}
+
+	identityPath, err := root.ZitiIdentityNamed(root.EnvironmentIdentityName())
+	if err != nil {
+		return fmt.Errorf("locate local zrok identity: %w", err)
+	}
+	if err := os.Remove(identityPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove local zrok identity after remote disable: %w", err)
+	}
+	if err := root.DeleteEnvironment(); err != nil {
+		return fmt.Errorf("remove local zrok credentials after remote disable: %w", err)
+	}
+	return nil
+}
+
+func validateDisablePreconditions(enabled bool, activeForwarders int) error {
+	if !enabled {
+		return errors.New("zrok environment is not enabled")
+	}
+	if activeForwarders != 0 {
+		return errors.New("stop all active TCP forwarders before disabling zrok")
 	}
 	return nil
 }
@@ -378,6 +423,9 @@ func DeleteShare(shareToken string) error {
 	if shareToken == "" {
 		return errors.New("share token is required")
 	}
+	if _, active := forwarders[shareToken]; active {
+		return errors.New("stop the TCP forwarder before deleting its share")
+	}
 	if err := sdk.DeleteShare(root, &sdk.Share{Token: shareToken}); err != nil {
 		return fmt.Errorf("delete zrok share: %w", err)
 	}
@@ -390,6 +438,11 @@ func buildShareRequest(backendMode, shareMode, target string) (*sdk.ShareRequest
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return nil, errors.New("share target is required")
+	}
+	if backendMode == string(sdk.TcpTunnelBackendMode) {
+		if err := validateTCPAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid TCP tunnel target: %w", err)
+		}
 	}
 
 	backend := sdk.BackendMode(backendMode)
