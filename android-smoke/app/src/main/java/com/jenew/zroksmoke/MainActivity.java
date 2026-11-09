@@ -1,11 +1,13 @@
 package com.jenew.zroksmoke;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.os.Bundle;
+import android.content.pm.PackageManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
@@ -48,6 +50,9 @@ public final class MainActivity extends Activity {
             return;
         }
         buildScreen();
+        if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7402);
+        }
         refresh();
     }
 
@@ -267,8 +272,18 @@ public final class MainActivity extends Activity {
         Button engineToggle = new Button(this);
         engineToggle.setText(running ? "STOP " + backend.toUpperCase() + " ENGINE" : "START " + backend.toUpperCase() + " ENGINE");
         engineToggle.setOnClickListener(v -> runTask(running ? "Stopping " + backend + " engine…" : "Starting " + backend + " engine…", () -> {
-            if (running) bridge.Bridge.stopShareBackend(shareToken);
-            else bridge.Bridge.startShareBackend(shareToken, backend, target);
+            if (running) {
+                bridge.Bridge.stopShareBackend(shareToken);
+                if (bridge.Bridge.activeBackendCount() == 0) ZrokForegroundService.stop(this);
+            } else {
+                ZrokForegroundService.start(this);
+                try {
+                    bridge.Bridge.startShareBackend(shareToken, backend, target);
+                } catch (Throwable failure) {
+                    if (bridge.Bridge.activeBackendCount() == 0) ZrokForegroundService.stop(this);
+                    throw failure;
+                }
+            }
             return null;
         }));
         servicesContainer.addView(engineToggle, new LinearLayout.LayoutParams(-1, dp(48)));
