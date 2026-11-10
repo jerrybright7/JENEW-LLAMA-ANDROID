@@ -298,7 +298,7 @@ public final class MainActivity extends Activity {
                 + "   •   Enabled: " + status.optBoolean("enabled")
                 + "   •   Identity saved: " + status.optBoolean("identitySaved")
                 + "   •   Active forwarders: " + status.optInt("activeForwarders")
-                + "   •   Backend engines: " + status.optInt("activeBackends")
+                + "   •   Share engines: " + status.optInt("activeShareBackends")
                 + "   •   Private access: " + status.optInt("activeAccessForwarders")
                 + "   •   In-flight tests: " + status.optInt("activeOperations")
                 + "   •   Managed: " + status.optInt("managedShares")
@@ -450,7 +450,7 @@ public final class MainActivity extends Activity {
                     String shares = bridge.Bridge.listManagedShares();
                     main.post(() -> { renderState(status, shares); messageView.setText(failure); });
                 } catch (Throwable refreshError) {
-                    main.post(() -> messageView.setText(failure + "\\nStatus refresh also failed: " + safeMessage(refreshError)));
+                    main.post(() -> messageView.setText(failure + "\nStatus refresh also failed: " + safeMessage(refreshError)));
                 }
             }
         });
