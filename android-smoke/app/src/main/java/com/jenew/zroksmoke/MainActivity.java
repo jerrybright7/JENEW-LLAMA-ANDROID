@@ -162,6 +162,13 @@ public final class MainActivity extends Activity {
                     return null;
                 }));
         });
+        addButton("REVOKE ALL ACCESS GRANTS FOR SELECTED SHARE", () -> confirm(
+            "Revoke every managed access grant?",
+            "This removes all locally managed private access grants for the selected share. The share itself will remain.",
+            () -> runTask("Revoking private access grants…", () -> {
+                bridge.Bridge.deleteAccessGrantsForShare(selectedManagedShareToken());
+                return null;
+            })));
         addButton("REFRESH PRIVATE ACCESS LIST", () -> runTask(
             "Refreshing private access records…", () -> {
                 bridge.Bridge.listManagedAccesses(); // Contains revocation tokens; intentionally never displayed.
