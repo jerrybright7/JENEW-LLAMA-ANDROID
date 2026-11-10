@@ -18,15 +18,22 @@ import sys
 
 path = Path(sys.argv[1])
 source = path.read_text()
-old = "Timeout:       10 * time.Second,"
-new = "Timeout:       0, // JENEW: disable the overall HTTP request timeout"
-count = source.count(old)
+import re
+
+# Anchor to the standalone http.Client.Timeout field. A substring search also
+# matches TLSHandshakeTimeout, which must remain enabled.
+pattern = re.compile(r"(?m)^(\\s*)Timeout:\\s*10\\s*\\*\\s*time\\.Second,\\s*$")
+source, count = pattern.subn(
+    r"\\1Timeout:       0, // JENEW: disable only the overall HTTP request timeout",
+    source,
+    count=1,
+)
 if count != 1:
     raise SystemExit(
-        f"Expected exactly one OpenZiti HTTP timeout assignment, found {count}; "
+        f"Expected one standalone http.Client.Timeout field, found {count}; "
         "refusing to apply an uncertain patch."
     )
-path.write_text(source.replace(old, new, 1))
+path.write_text(source)
 PY
 
 go mod edit -replace=github.com/openziti/sdk-golang=./"$PATCHED_DIR"
