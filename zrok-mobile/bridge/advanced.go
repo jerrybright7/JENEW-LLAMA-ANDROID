@@ -171,7 +171,7 @@ func CreateAccessGrant(shareToken, bindAddress string) (string, error) {
 		ShareToken: shareToken, BindAddress: strings.TrimSpace(bindAddress),
 	})
 	if err != nil {
-		return "", fmt.Errorf("create zrok private access: %w", err)
+		return "", fmt.Errorf("create zrok private access: %s", strings.ReplaceAll(err.Error(), shareToken, "[redacted]"))
 	}
 	managedAccesses[access.Token] = managedAccess{
 		ShareToken: shareToken, AccessToken: access.Token,
@@ -228,7 +228,7 @@ func DeleteAccessGrant(accessToken string) error {
 		Token: record.AccessToken, ShareToken: record.ShareToken,
 		BackendMode: sdk.BackendMode(record.BackendMode),
 	}); err != nil {
-		return fmt.Errorf("revoke zrok private access: %w", err)
+		return fmt.Errorf("revoke zrok private access: %s", strings.ReplaceAll(err.Error(), accessToken, "[redacted]"))
 	}
 	delete(managedAccesses, accessToken)
 	return persistAccessesLocked()
@@ -248,7 +248,7 @@ func GetShareDetail(shareToken string) (string, error) {
 	}
 	detail, err := sdk.GetShareDetail(root, shareToken)
 	if err != nil {
-		return "", fmt.Errorf("get zrok share detail: %w", err)
+		return "", fmt.Errorf("get zrok share detail: %s", strings.ReplaceAll(err.Error(), shareToken, "[redacted]"))
 	}
 	data, err := json.Marshal(detail)
 	if err != nil {
