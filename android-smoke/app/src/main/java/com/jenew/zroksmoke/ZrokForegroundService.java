@@ -58,6 +58,13 @@ public final class ZrokForegroundService extends Service {
                     String message = failure.getMessage();
                     if (message == null || message.trim().isEmpty()) message = failure.getClass().getSimpleName();
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("restoreError", message).apply();
+                    NotificationManager manager = getSystemService(NotificationManager.class);
+                    if (manager != null) {
+                        Notification failed = builder.setContentTitle("JENEW zrok needs attention")
+                            .setContentText("Tunnel restore failed: " + message)
+                            .setOngoing(true).setCategory(Notification.CATEGORY_SERVICE).build();
+                        manager.notify(NOTIFICATION_ID, failed);
+                    }
                 } finally {
                     RESTORE_IN_PROGRESS.set(false);
                 }
