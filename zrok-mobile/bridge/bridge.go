@@ -142,8 +142,9 @@ func (f *tcpForwarder) acceptLoop(localAddress, shareToken string) {
 			case <-f.stop:
 				return
 			default:
+				recordRuntimeError("inbound TCP share listener failed: " + err.Error())
+				return
 			}
-			return
 		}
 		if !f.track(remote) {
 			_ = remote.Close()
@@ -161,6 +162,7 @@ func (f *tcpForwarder) forwardConnection(remote net.Conn, localAddress string) {
 
 	local, err := net.DialTimeout("tcp", localAddress, 10*time.Second)
 	if err != nil {
+		recordRuntimeError("inbound TCP target dial failed: " + err.Error())
 		return
 	}
 	if !f.track(local) {
@@ -409,6 +411,7 @@ func Status() string {
 		"identitySaved":    false,
 		"activeForwarders": len(forwarders),
 		"activeBackends": ActiveBackendCount(),
+		"activeShareBackends": ActiveShareBackendCount(),
 		"activeAccessForwarders": ActiveAccessForwarderCount(),
 		"activeOperations": activeOperations,
 		"lastRuntimeError": lastRuntimeError,
