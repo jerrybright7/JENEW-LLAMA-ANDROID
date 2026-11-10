@@ -162,7 +162,7 @@ public final class MainActivity extends Activity {
                     return null;
                 }));
         });
-        addButton("REVOKE ALL ACCESS GRANTS FOR SELECTED SHARE", () -> confirm(
+        addButton("REVOKE ALL MANAGED PRIVATE ACCESS GRANTS", () -> confirm(
             "Revoke every managed access grant?",
             "This removes all locally managed private access grants for the selected share. The share itself will remain.",
             () -> runTask("Revoking private access grants…", () -> {
