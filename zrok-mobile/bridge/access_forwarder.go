@@ -54,11 +54,29 @@ func (f *tcpAccessForwarder) close() error {
 // StartTCPAccessForwarder exposes a remote private TCP share on a local
 // loopback address. The access grant is retained so the forwarder can be
 // stopped and restarted without losing the authorization record.
+// Private access forwarders must remain reachable only from this device.
+func validateLoopbackBindAddress(address string) error {
+	if err := validateTCPAddress(address); err != nil { return err }
+	host, _, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil { return err }
+	if strings.EqualFold(host, "localhost") { return nil }
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() { return errors.New("private access must bind to localhost or a loopback IP address") }
+	return nil
+}
+
 func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 	shareToken = strings.TrimSpace(shareToken)
 	bindAddress = strings.TrimSpace(bindAddress)
 	if shareToken == "" { return errors.New("share token is required") }
-	if err := validateTCPAddress(bindAddress); err != nil { return fmt.Errorf("invalid local bind address: %w", err) }
+	if err := validateLoopbackBindAddress(bindAddress); err != nil { return fmt.Errorf("invalid private access bind address: %w", err) }
+
+	// Check the share before binding so a duplicate start cannot surface as
+	// a misleading OS-level "address already in use" error.
+	backendMu.Lock()
+	alreadyRunning := accessForwarders[shareToken] != nil
+	backendMu.Unlock()
+	if alreadyRunning { return errors.New("private access forwarder is already running for this share") }
 
 	mu.Lock()
 	if root == nil || !root.IsEnabled() { mu.Unlock(); return errors.New("zrok environment is not enabled") }
@@ -71,7 +89,7 @@ func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 
 	if accessToken == "" {
 		grant, err := CreateAccessGrant(shareToken, bindAddress)
-		if err != nil { return err }
+		if err != nil { return fmt.Errorf("create private access grant: %s", strings.ReplaceAll(err.Error(), shareToken, "[redacted]")) }
 		// The result is an internal JSON response; do not log it.
 		var decoded struct { AccessToken string `json:"accessToken"` }
 		if err := json.Unmarshal([]byte(grant), &decoded); err != nil { return fmt.Errorf("decode private access grant: %w", err) }
@@ -123,7 +141,13 @@ func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 		for {
 			local, acceptErr := listener.Accept()
 			if acceptErr != nil {
-				select { case <-f.stop: return; default: return }
+				select {
+				case <-f.stop:
+					return
+				default:
+					recordRuntimeError("private access listener failed: " + acceptErr.Error())
+					return
+				}
 			}
 			if !f.track(local) { _ = local.Close(); return }
 			go func(local net.Conn) {
@@ -131,9 +155,16 @@ func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 				mu.Lock()
 				currentRoot := root
 				mu.Unlock()
-				if currentRoot == nil { return }
+				if currentRoot == nil {
+					recordRuntimeError("private access forwarder: zrok environment is not initialized")
+					return
+				}
 				remote, dialErr := sdk.NewDialer(shareToken, currentRoot)
-				if dialErr != nil { return }
+				if dialErr != nil {
+					recordRuntimeError("private access dial failed: " + strings.ReplaceAll(dialErr.Error(), shareToken, "[redacted]"))
+					return
+				}
+				clearRuntimeError()
 				defer remote.Close()
 				if !f.track(remote) { return }
 				defer f.untrack(remote)
@@ -151,6 +182,7 @@ func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 			}(local)
 		}
 	}()
+	clearRuntimeError()
 	return nil
 }
 

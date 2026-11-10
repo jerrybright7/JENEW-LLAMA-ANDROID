@@ -110,7 +110,7 @@ public final class MainActivity extends Activity {
         backendInput = addSpinner("Backend type", BACKENDS);
         modeInput = addSpinner("Share visibility", MODES);
         targetInput = addInput("Backend target", "127.0.0.1:8080", false);
-        advancedOptionsInput = addInput("Advanced share options (JSON)", "{\"backendMode\":\"web\",\"shareMode\":\"private\",\"target\":\"" + getFilesDir().getAbsolutePath() + "/public\",\"permissionMode\":\"open\"}", false);
+        advancedOptionsInput = addInput("Advanced share options (JSON)", "{\"backendMode\":\"tcpTunnel\",\"shareMode\":\"private\",\"target\":\"127.0.0.1:8080\",\"permissionMode\":\"open\"}", false);
         advancedOptionsInput.setSingleLine(false);
         advancedOptionsInput.setMinLines(3);
         advancedOptionsInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
@@ -146,8 +146,10 @@ public final class MainActivity extends Activity {
         }));
         addButton("CREATE PRIVATE ACCESS GRANT", () -> {
             final String share = selectedManagedShareToken();
-            runTaskWithResult("Creating private access grant…", () ->
-                bridge.Bridge.createAccessGrant(share, ""));
+            runTask("Creating private access grant…", () -> {
+                bridge.Bridge.createAccessGrant(share, "");
+                return null; // Never render the access token in the UI result panel.
+            });
         });
         accessTokenInput = addInput("Access token to revoke", "", true);
         accessTokenInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
@@ -160,8 +162,18 @@ public final class MainActivity extends Activity {
                     return null;
                 }));
         });
-        addButton("REFRESH PRIVATE ACCESS LIST", () -> runTaskWithResult(
-            "Loading private accesses…", () -> bridge.Bridge.listManagedAccesses()));
+        addButton("REVOKE ALL MANAGED PRIVATE ACCESS GRANTS", () -> confirm(
+            "Revoke every managed access grant?",
+            "This removes all locally managed private access grants for the selected share. The share itself will remain.",
+            () -> runTask("Revoking private access grants…", () -> {
+                bridge.Bridge.deleteAccessGrantsForShare(selectedManagedShareToken());
+                return null;
+            })));
+        addButton("REFRESH PRIVATE ACCESS LIST", () -> runTask(
+            "Refreshing private access records…", () -> {
+                bridge.Bridge.listManagedAccesses(); // Contains revocation tokens; intentionally never displayed.
+                return null;
+            }));
 
         addSection("ZROK DRIVE FILE OPERATIONS");
         driveRemoteInput = addInput("Remote Drive path", "/", false);
@@ -293,8 +305,12 @@ public final class MainActivity extends Activity {
                 + "   •   Enabled: " + status.optBoolean("enabled")
                 + "   •   Identity saved: " + status.optBoolean("identitySaved")
                 + "   •   Active forwarders: " + status.optInt("activeForwarders")
+                + "   •   Share engines: " + status.optInt("activeShareBackends")
+                + "   •   Private access: " + status.optInt("activeAccessForwarders")
+                + "   •   In-flight tests: " + status.optInt("activeOperations")
                 + "   •   Managed: " + status.optInt("managedShares")
-                + (status.has("apiEndpoint") ? "\nAPI: " + status.optString("apiEndpoint") : ""));
+                + (status.has("apiEndpoint") ? "\nAPI: " + status.optString("apiEndpoint") : "")
+                + (status.optString("lastRuntimeError", "").isEmpty() ? "" : "\nRuntime error: " + status.optString("lastRuntimeError")));
             JSONArray shares = new JSONArray(sharesJson);
             updateManagedShareSelector(shares);
             servicesContainer.removeAllViews();
@@ -435,7 +451,14 @@ public final class MainActivity extends Activity {
                 String shares = bridge.Bridge.listManagedShares();
                 main.post(() -> renderState(status, shares));
             } catch (Throwable error) {
-                main.post(() -> messageView.setText("Operation failed: " + safeMessage(error)));
+                final String failure = "Operation failed: " + safeMessage(error);
+                try {
+                    String status = bridge.Bridge.status();
+                    String shares = bridge.Bridge.listManagedShares();
+                    main.post(() -> { renderState(status, shares); messageView.setText(failure); });
+                } catch (Throwable refreshError) {
+                    main.post(() -> messageView.setText(failure + "\nStatus refresh also failed: " + safeMessage(refreshError)));
+                }
             }
         });
     }
@@ -452,7 +475,14 @@ public final class MainActivity extends Activity {
                     if (result != null) messageView.setText("ZROK OPERATION RESULT\n" + result);
                 });
             } catch (Throwable error) {
-                main.post(() -> messageView.setText("Private-share test failed: " + safeMessage(error)));
+                final String failure = "Operation failed: " + safeMessage(error);
+                try {
+                    String status = bridge.Bridge.status();
+                    String shares = bridge.Bridge.listManagedShares();
+                    main.post(() -> { renderState(status, shares); messageView.setText(failure); });
+                } catch (Throwable refreshError) {
+                    main.post(() -> messageView.setText(failure + "\nStatus refresh also failed: " + safeMessage(refreshError)));
+                }
             }
         });
     }

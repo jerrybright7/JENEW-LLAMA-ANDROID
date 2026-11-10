@@ -225,3 +225,12 @@ func TestBuildShareRequestSupportsModeSpecificTargets(t *testing.T) {
 		t.Fatal("proxy accepted a target without an HTTP scheme")
 	}
 }
+
+func TestValidateLoopbackBindAddress(t *testing.T) {
+	for _, address := range []string{"127.0.0.1:9000", "localhost:9000", "[::1]:9000"} {
+		if err := validateLoopbackBindAddress(address); err != nil { t.Errorf("loopback address %q rejected: %v", address, err) }
+	}
+	for _, address := range []string{"0.0.0.0:9000", "192.168.1.10:9000", "10.0.0.2:9000", ":9000"} {
+		if err := validateLoopbackBindAddress(address); err == nil { t.Errorf("non-loopback address %q unexpectedly accepted", address) }
+	}
+}
