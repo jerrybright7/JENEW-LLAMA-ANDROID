@@ -112,7 +112,7 @@ func StartShareBackend(shareToken, backendMode, target string) error {
 		return fmt.Errorf("unsupported backend engine %q", backendMode)
 	}
 	if err != nil {
-		return fmt.Errorf("initialize %s backend: %w", backendMode, err)
+		return fmt.Errorf("initialize %s backend: %s", backendMode, strings.ReplaceAll(err.Error(), shareToken, "[redacted]"))
 	}
 
 	backendMu.Lock()
