@@ -474,7 +474,7 @@ public final class MainActivity extends Activity {
                     String shares = bridge.Bridge.listManagedShares();
                     main.post(() -> { renderState(status, shares); messageView.setText(failure); });
                 } catch (Throwable refreshError) {
-                    main.post(() -> messageView.setText(failure + "\\nStatus refresh also failed: " + safeMessage(refreshError)));
+                    main.post(() -> messageView.setText(failure + "\nStatus refresh also failed: " + safeMessage(refreshError)));
                 }
             }
         });
