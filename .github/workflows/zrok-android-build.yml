@@ -42,12 +42,14 @@ jobs:
           yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses
           "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Prepare OpenZiti controller client
+        working-directory: zrok-mobile
+        run: bash prepare-openziti-sdk.sh
       - name: Test Go bridge
         working-directory: zrok-mobile
         env:
           CGO_ENABLED: '1'
         run: |
-          go mod tidy
           go test ./...
       - name: Install and initialize gomobile
         run: |
