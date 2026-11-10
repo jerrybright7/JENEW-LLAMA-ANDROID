@@ -234,6 +234,40 @@ func DeleteAccessGrant(accessToken string) error {
 	return persistAccessesLocked()
 }
 
+// DeleteAccessGrantsForShare revokes every locally managed access grant for a
+// selected share without exposing the access tokens to the Android UI.
+func DeleteAccessGrantsForShare(shareToken string) error {
+	shareToken = strings.TrimSpace(shareToken)
+	if shareToken == "" { return errors.New("share token is required") }
+	mu.Lock()
+	if root == nil || !root.IsEnabled() { mu.Unlock(); return errors.New("zrok environment is not enabled") }
+	if err := ensureAccessRegistryLocked(); err != nil { mu.Unlock(); return err }
+	currentRoot := root
+	records := make([]managedAccess, 0)
+	for _, record := range managedAccesses { if record.ShareToken == shareToken { records = append(records, record) } }
+	if len(records) == 0 { mu.Unlock(); return errors.New("no managed private access grants exist for this share") }
+	activeOperations++
+	mu.Unlock()
+	defer func() { mu.Lock(); activeOperations--; mu.Unlock() }()
+	var failures []string
+	for _, record := range records {
+		access := &sdk.Access{Token: record.AccessToken, ShareToken: record.ShareToken, BackendMode: sdk.BackendMode(record.BackendMode)}
+		if err := sdk.DeleteAccess(currentRoot, access); err != nil {
+			message := strings.ReplaceAll(err.Error(), record.AccessToken, "[redacted]")
+			message = strings.ReplaceAll(message, shareToken, "[redacted]")
+			failures = append(failures, record.BackendMode + " grant: " + message)
+			continue
+		}
+		mu.Lock()
+		delete(managedAccesses, record.AccessToken)
+		persistErr := persistAccessesLocked()
+		mu.Unlock()
+		if persistErr != nil { failures = append(failures, "grant revoked remotely but local registry update failed: " + persistErr.Error()) }
+	}
+	if len(failures) > 0 { return fmt.Errorf("some private access grants could not be fully revoked: %s", strings.Join(failures, "; ")) }
+	return nil
+}
+
 // GetShareDetail returns controller metadata for a share as JSON. Treat
 // returned metadata as private because it can contain identifiers and tokens.
 func GetShareDetail(shareToken string) (string, error) {
