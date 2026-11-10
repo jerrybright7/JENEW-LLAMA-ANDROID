@@ -112,7 +112,7 @@ func StartShareBackend(shareToken, backendMode, target string) error {
 		return fmt.Errorf("unsupported backend engine %q", backendMode)
 	}
 	if err != nil {
-		return fmt.Errorf("initialize %s backend: %w", backendMode, err)
+		return fmt.Errorf("initialize %s backend: %s", backendMode, strings.ReplaceAll(err.Error(), shareToken, "[redacted]"))
 	}
 
 	backendMu.Lock()
@@ -136,25 +136,36 @@ func StartShareBackend(shareToken, backendMode, target string) error {
 		return persistErr
 	}
 
+	clearRuntimeError()
 	go func() {
 		runErr := backend.Run()
 		// Caddy's Run starts its managed servers and returns after startup.
 		if backendMode == "web" || backendMode == "caddy" {
-			if runErr != nil { _ = StopShareBackend(shareToken) }
+			if runErr != nil {
+				recordRuntimeError(backendMode + " backend failed: " + strings.ReplaceAll(runErr.Error(), shareToken, "[redacted]"))
+				_ = StopShareBackend(shareToken)
+			}
 			return
 		}
 		backendMu.Lock()
-		if current := backends[shareToken]; current != nil && current.backend == backend {
-			delete(backends, shareToken)
+		current := backends[shareToken]
+		if current == nil || current.backend != backend {
+			backendMu.Unlock()
+			return // a newer engine owns this share; ignore this stale completion
 		}
+		delete(backends, shareToken)
 		backendMu.Unlock()
 		mu.Lock()
-		if current, ok := managedShares[shareToken]; ok {
-			current.Running = false
-			managedShares[shareToken] = current
+		if managed, ok := managedShares[shareToken]; ok {
+			managed.Running = false
+			managed.AutoStart = false
+			managedShares[shareToken] = managed
 			_ = persistManagedSharesLocked()
 		}
 		mu.Unlock()
+		if runErr != nil {
+			recordRuntimeError(backendMode + " backend stopped unexpectedly: " + strings.ReplaceAll(runErr.Error(), shareToken, "[redacted]"))
+		}
 	}()
 	return nil
 }
@@ -173,6 +184,18 @@ func StopShareBackend(shareToken string) error {
 	backendMu.Unlock()
 
 	err := entry.backend.Stop()
+	if err != nil {
+		// Keep a failed-to-stop engine visible so the UI does not claim it is
+		// stopped while its listener may still be serving traffic.
+		backendMu.Lock()
+		if backends[shareToken] == nil {
+			backends[shareToken] = entry
+			if entry.mode == "web" || entry.mode == "caddy" { caddyBackendToken = shareToken }
+		}
+		backendMu.Unlock()
+		recordRuntimeError("could not stop " + entry.mode + " backend: " + strings.ReplaceAll(err.Error(), shareToken, "[redacted]"))
+		return fmt.Errorf("stop %s backend: %w", entry.mode, err)
+	}
 	mu.Lock()
 	if share, ok := managedShares[shareToken]; ok {
 		share.Running = false
@@ -181,7 +204,7 @@ func StopShareBackend(shareToken string) error {
 		_ = persistManagedSharesLocked()
 	}
 	mu.Unlock()
-	if err != nil { return fmt.Errorf("stop %s backend: %w", entry.mode, err) }
+	clearRuntimeError()
 	return nil
 }
 
@@ -196,4 +219,11 @@ func ActiveBackendCount() int32 {
 	backendMu.Lock()
 	defer backendMu.Unlock()
 	return int32(len(backends) + len(accessForwarders))
+}
+
+// ActiveShareBackendCount reports only the actual zrok share-serving engines.
+func ActiveShareBackendCount() int32 {
+	backendMu.Lock()
+	defer backendMu.Unlock()
+	return int32(len(backends))
 }
