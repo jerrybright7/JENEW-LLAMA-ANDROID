@@ -78,7 +78,7 @@ func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 
 	if accessToken == "" {
 		grant, err := CreateAccessGrant(shareToken, bindAddress)
-		if err != nil { return err }
+		if err != nil { return fmt.Errorf("create private access grant: %s", strings.ReplaceAll(err.Error(), shareToken, "[redacted]")) }
 		// The result is an internal JSON response; do not log it.
 		var decoded struct { AccessToken string `json:"accessToken"` }
 		if err := json.Unmarshal([]byte(grant), &decoded); err != nil { return fmt.Errorf("decode private access grant: %w", err) }
