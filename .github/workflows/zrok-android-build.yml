@@ -50,7 +50,10 @@ jobs:
         env:
           CGO_ENABLED: '1'
         run: |
-          go mod download
+          set -euo pipefail
+          # The bridge imports zrok's transitive packages directly. Generate the
+          # complete checksum set before testing (go mod download alone is not enough).
+          go mod tidy
           go test ./...
       - name: Install and initialize gomobile
         run: |
