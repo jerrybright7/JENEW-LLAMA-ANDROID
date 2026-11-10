@@ -6,7 +6,7 @@ on:
       - zrok-gomobile-prototype
       - zrok-repair-2026-11-10
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
     branches:
       - zrok-gomobile-prototype
   workflow_dispatch:
