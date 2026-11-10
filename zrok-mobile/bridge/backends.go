@@ -142,8 +142,10 @@ func StartShareBackend(shareToken, backendMode, target string) error {
 		// Caddy's Run starts its managed servers and returns after startup.
 		if backendMode == "web" || backendMode == "caddy" {
 			if runErr != nil {
-				recordRuntimeError(backendMode + " backend failed: " + strings.ReplaceAll(runErr.Error(), shareToken, "[redacted]"))
-				_ = StopShareBackend(shareToken)
+				cleanupErr := StopShareBackend(shareToken)
+				message := backendMode + " backend failed: " + strings.ReplaceAll(runErr.Error(), shareToken, "[redacted]")
+				if cleanupErr != nil { message += "; cleanup failed: " + strings.ReplaceAll(cleanupErr.Error(), shareToken, "[redacted]") }
+				recordRuntimeError(message)
 			}
 			return
 		}
