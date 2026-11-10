@@ -31,10 +31,9 @@ jobs:
           go-version: '1.27.0'
           cache: true
           cache-dependency-path: zrok-mobile/go.sum
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
       - name: Install Android platform and NDK
         run: |
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           yes | sdkmanager --licenses
           sdkmanager --sdk_root="$ANDROID_HOME" --install 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
