@@ -68,6 +68,12 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           "$(go env GOPATH)/bin/gomobile" init
 
+      - name: Remove the SDK's overall controller HTTP timeout
+        working-directory: zrok-mobile
+        run: |
+          set -euo pipefail
+          bash prepare-openziti-sdk.sh
+
       - name: Run zrok bridge unit tests
         working-directory: zrok-mobile
         run: |
