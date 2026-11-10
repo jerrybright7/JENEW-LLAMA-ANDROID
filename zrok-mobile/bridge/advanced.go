@@ -171,7 +171,7 @@ func CreateAccessGrant(shareToken, bindAddress string) (string, error) {
 		ShareToken: shareToken, BindAddress: strings.TrimSpace(bindAddress),
 	})
 	if err != nil {
-		return "", fmt.Errorf("create zrok private access: %w", err)
+		return "", fmt.Errorf("create zrok private access: %s", strings.ReplaceAll(err.Error(), shareToken, "[redacted]"))
 	}
 	managedAccesses[access.Token] = managedAccess{
 		ShareToken: shareToken, AccessToken: access.Token,
@@ -214,24 +214,62 @@ func ListManagedAccesses() string {
 
 // DeleteAccessGrant revokes a previously-created private access grant.
 func DeleteAccessGrant(accessToken string) error {
-	mu.Lock()
-	defer mu.Unlock()
-	if root == nil || !root.IsEnabled() {
-		return errors.New("zrok environment is not enabled")
-	}
 	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" { return errors.New("access token is required") }
+	mu.Lock()
+	if root == nil || !root.IsEnabled() { mu.Unlock(); return errors.New("zrok environment is not enabled") }
+	if err := ensureAccessRegistryLocked(); err != nil { mu.Unlock(); return err }
 	record, exists := managedAccesses[accessToken]
-	if !exists {
-		return errors.New("private access grant is not managed by this app")
+	if !exists { mu.Unlock(); return errors.New("private access grant is not managed by this app") }
+	currentRoot := root
+	activeOperations++
+	mu.Unlock()
+	defer func() { mu.Lock(); activeOperations--; mu.Unlock() }()
+	access := &sdk.Access{Token: record.AccessToken, ShareToken: record.ShareToken, BackendMode: sdk.BackendMode(record.BackendMode)}
+	if err := sdk.DeleteAccess(currentRoot, access); err != nil {
+		message := strings.ReplaceAll(err.Error(), accessToken, "[redacted]")
+		message = strings.ReplaceAll(message, record.ShareToken, "[redacted]")
+		return fmt.Errorf("revoke zrok private access: %s", message)
 	}
-	if err := sdk.DeleteAccess(root, &sdk.Access{
-		Token: record.AccessToken, ShareToken: record.ShareToken,
-		BackendMode: sdk.BackendMode(record.BackendMode),
-	}); err != nil {
-		return fmt.Errorf("revoke zrok private access: %w", err)
-	}
+	mu.Lock()
 	delete(managedAccesses, accessToken)
-	return persistAccessesLocked()
+	persistErr := persistAccessesLocked()
+	mu.Unlock()
+	return persistErr
+}
+
+// DeleteAccessGrantsForShare revokes every locally managed access grant for a
+// selected share without exposing the access tokens to the Android UI.
+func DeleteAccessGrantsForShare(shareToken string) error {
+	shareToken = strings.TrimSpace(shareToken)
+	if shareToken == "" { return errors.New("share token is required") }
+	mu.Lock()
+	if root == nil || !root.IsEnabled() { mu.Unlock(); return errors.New("zrok environment is not enabled") }
+	if err := ensureAccessRegistryLocked(); err != nil { mu.Unlock(); return err }
+	currentRoot := root
+	records := make([]managedAccess, 0)
+	for _, record := range managedAccesses { if record.ShareToken == shareToken { records = append(records, record) } }
+	if len(records) == 0 { mu.Unlock(); return errors.New("no managed private access grants exist for this share") }
+	activeOperations++
+	mu.Unlock()
+	defer func() { mu.Lock(); activeOperations--; mu.Unlock() }()
+	var failures []string
+	for _, record := range records {
+		access := &sdk.Access{Token: record.AccessToken, ShareToken: record.ShareToken, BackendMode: sdk.BackendMode(record.BackendMode)}
+		if err := sdk.DeleteAccess(currentRoot, access); err != nil {
+			message := strings.ReplaceAll(err.Error(), record.AccessToken, "[redacted]")
+			message = strings.ReplaceAll(message, shareToken, "[redacted]")
+			failures = append(failures, record.BackendMode + " grant: " + message)
+			continue
+		}
+		mu.Lock()
+		delete(managedAccesses, record.AccessToken)
+		persistErr := persistAccessesLocked()
+		mu.Unlock()
+		if persistErr != nil { failures = append(failures, "grant revoked remotely but local registry update failed: " + persistErr.Error()) }
+	}
+	if len(failures) > 0 { return fmt.Errorf("some private access grants could not be fully revoked: %s", strings.Join(failures, "; ")) }
+	return nil
 }
 
 // GetShareDetail returns controller metadata for a share as JSON. Treat
@@ -248,7 +286,7 @@ func GetShareDetail(shareToken string) (string, error) {
 	}
 	detail, err := sdk.GetShareDetail(root, shareToken)
 	if err != nil {
-		return "", fmt.Errorf("get zrok share detail: %w", err)
+		return "", fmt.Errorf("get zrok share detail: %s", strings.ReplaceAll(err.Error(), shareToken, "[redacted]"))
 	}
 	data, err := json.Marshal(detail)
 	if err != nil {
