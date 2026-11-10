@@ -60,6 +60,13 @@ func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 	if shareToken == "" { return errors.New("share token is required") }
 	if err := validateTCPAddress(bindAddress); err != nil { return fmt.Errorf("invalid local bind address: %w", err) }
 
+	// Check the share before binding so a duplicate start cannot surface as
+	// a misleading OS-level "address already in use" error.
+	backendMu.Lock()
+	alreadyRunning := accessForwarders[shareToken] != nil
+	backendMu.Unlock()
+	if alreadyRunning { return errors.New("private access forwarder is already running for this share") }
+
 	mu.Lock()
 	if root == nil || !root.IsEnabled() { mu.Unlock(); return errors.New("zrok environment is not enabled") }
 	if err := ensureAccessRegistryLocked(); err != nil { mu.Unlock(); return err }
@@ -131,9 +138,16 @@ func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 				mu.Lock()
 				currentRoot := root
 				mu.Unlock()
-				if currentRoot == nil { return }
+				if currentRoot == nil {
+					recordRuntimeError("private access forwarder: zrok environment is not initialized")
+					return
+				}
 				remote, dialErr := sdk.NewDialer(shareToken, currentRoot)
-				if dialErr != nil { return }
+				if dialErr != nil {
+					recordRuntimeError("private access dial failed: " + strings.ReplaceAll(dialErr.Error(), shareToken, "[redacted]"))
+					return
+				}
+				clearRuntimeError()
 				defer remote.Close()
 				if !f.track(remote) { return }
 				defer f.untrack(remote)
@@ -151,6 +165,7 @@ func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 			}(local)
 		}
 	}()
+	clearRuntimeError()
 	return nil
 }
 
