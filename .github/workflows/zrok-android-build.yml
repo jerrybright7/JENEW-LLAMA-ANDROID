@@ -42,11 +42,17 @@ jobs:
           yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses
           "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Prepare OpenZiti controller client
+        working-directory: zrok-mobile
+        run: bash prepare-openziti-sdk.sh
       - name: Test Go bridge
         working-directory: zrok-mobile
         env:
           CGO_ENABLED: '1'
         run: |
+          set -euo pipefail
+          # The bridge imports zrok's transitive packages directly. Generate the
+          # complete checksum set before testing (go mod download alone is not enough).
           go mod tidy
           go test ./...
       - name: Install and initialize gomobile
@@ -59,7 +65,10 @@ jobs:
           CGO_ENABLED: '1'
         run: |
           mkdir -p ../android-smoke/app/libs
-          gomobile bind -v -target=android -androidapi 23 -o ../android-smoke/app/libs/jenew-zrok-sdk.aar ./bridge
+          gomobile bind -v -target=android/arm64 -androidapi 23 -o ../android-smoke/app/libs/jenew-zrok-sdk.aar ./bridge
+          unzip -l ../android-smoke/app/libs/jenew-zrok-sdk.aar
+          unzip -l ../android-smoke/app/libs/jenew-zrok-sdk.aar | grep -q "jni/arm64-v8a/libgojni.so"
+          ! unzip -l ../android-smoke/app/libs/jenew-zrok-sdk.aar | grep -Eq "jni/(armeabi-v7a|x86|x86_64)/libgojni.so"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
