@@ -47,7 +47,7 @@ jobs:
         env:
           CGO_ENABLED: '1'
         run: |
-          go mod download
+          go mod tidy
           go test ./...
       - name: Install and initialize gomobile
         run: |
