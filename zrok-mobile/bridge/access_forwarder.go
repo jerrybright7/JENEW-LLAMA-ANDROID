@@ -54,11 +54,22 @@ func (f *tcpAccessForwarder) close() error {
 // StartTCPAccessForwarder exposes a remote private TCP share on a local
 // loopback address. The access grant is retained so the forwarder can be
 // stopped and restarted without losing the authorization record.
+// Private access forwarders must remain reachable only from this device.
+func validateLoopbackBindAddress(address string) error {
+	if err := validateTCPAddress(address); err != nil { return err }
+	host, _, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil { return err }
+	if strings.EqualFold(host, "localhost") { return nil }
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() { return errors.New("private access must bind to localhost or a loopback IP address") }
+	return nil
+}
+
 func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 	shareToken = strings.TrimSpace(shareToken)
 	bindAddress = strings.TrimSpace(bindAddress)
 	if shareToken == "" { return errors.New("share token is required") }
-	if err := validateTCPAddress(bindAddress); err != nil { return fmt.Errorf("invalid local bind address: %w", err) }
+	if err := validateLoopbackBindAddress(bindAddress); err != nil { return fmt.Errorf("invalid private access bind address: %w", err) }
 
 	// Check the share before binding so a duplicate start cannot surface as
 	// a misleading OS-level "address already in use" error.
