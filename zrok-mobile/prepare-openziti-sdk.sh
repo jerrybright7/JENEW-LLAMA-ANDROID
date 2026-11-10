@@ -22,9 +22,9 @@ import re
 
 # Anchor to the standalone http.Client.Timeout field. A substring search also
 # matches TLSHandshakeTimeout, which must remain enabled.
-pattern = re.compile(r"(?m)^(\\s*)Timeout:\\s*10\\s*\\*\\s*time\\.Second,\\s*$")
+pattern = re.compile(r"(?m)^(\s*)Timeout:\s*10\s*\*\s*time\.Second,\s*$")
 source, count = pattern.subn(
-    r"\\1Timeout:       0, // JENEW: disable only the overall HTTP request timeout",
+    r"\1Timeout:       0, // JENEW: disable only the overall HTTP request timeout",
     source,
     count=1,
 )
