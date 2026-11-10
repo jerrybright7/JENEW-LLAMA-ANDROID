@@ -220,3 +220,10 @@ func ActiveBackendCount() int32 {
 	defer backendMu.Unlock()
 	return int32(len(backends) + len(accessForwarders))
 }
+
+// ActiveShareBackendCount reports only the actual zrok share-serving engines.
+func ActiveShareBackendCount() int32 {
+	backendMu.Lock()
+	defer backendMu.Unlock()
+	return int32(len(backends))
+}
