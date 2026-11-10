@@ -217,7 +217,7 @@ func Initialize(privateAppDirectory string) error {
 	}
 	privateAppDirectory = filepath.Clean(privateAppDirectory)
 	if root != nil && root.Metadata() != nil {
-		if root.Metadata().RootPath != privateAppDirectory && (len(forwarders) > 0 || ActiveBackendCount() > 0) {
+		if root.Metadata().RootPath != privateAppDirectory && (len(forwarders) > 0 || ActiveBackendCount() > 0 || activeOperations > 0) {
 			return errors.New("cannot switch zrok storage roots while TCP forwarders are active")
 		}
 		if root.Metadata().RootPath == privateAppDirectory && (len(forwarders) > 0 || ActiveBackendCount() > 0) {
