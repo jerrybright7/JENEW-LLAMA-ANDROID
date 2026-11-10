@@ -552,10 +552,10 @@ func TestPrivateShare(shareToken string) (string, error) {
 	mu.Unlock()
 	defer func() { mu.Lock(); activeOperations--; mu.Unlock() }()
 	access, err := sdk.CreateAccess(testRoot, &sdk.AccessRequest{ShareToken: shareToken})
-	if err != nil { return "", fmt.Errorf("create private-share access grant: %w", err) }
+	if err != nil { return "", fmt.Errorf("create private-share access grant: %s", strings.ReplaceAll(err.Error(), shareToken, "[redacted]")) }
 	defer func() { _ = sdk.DeleteAccess(testRoot, access) }()
 	conn, err := sdk.NewDialer(shareToken, testRoot)
-	if err != nil { return "", fmt.Errorf("create private-share dialer: %w", err) }
+	if err != nil { return "", fmt.Errorf("create private-share dialer: %s", strings.ReplaceAll(err.Error(), shareToken, "[redacted]")) }
 	defer conn.Close()
 	if err := conn.SetDeadline(time.Now().Add(45 * time.Second)); err != nil { return "", fmt.Errorf("set private-share test deadline: %w", err) }
 	if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil { return "", fmt.Errorf("send HTTP request through private share: %w", err) }
