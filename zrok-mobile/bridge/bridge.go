@@ -27,7 +27,13 @@ var (
 	forwarders        = map[string]*tcpForwarder{}
 	managedShares     = map[string]managedShare{}
 	shareRegistryPath string
+	activeOperations int32
+	lastRuntimeError string
 )
+
+// Runtime diagnostics are deliberately non-secret and never include tokens.
+func recordRuntimeError(message string) { mu.Lock(); lastRuntimeError = strings.TrimSpace(message); mu.Unlock() }
+func clearRuntimeError() { mu.Lock(); lastRuntimeError = ""; mu.Unlock() }
 
 type managedShare struct {
 	ShareToken       string   `json:"shareToken"`
@@ -136,8 +142,9 @@ func (f *tcpForwarder) acceptLoop(localAddress, shareToken string) {
 			case <-f.stop:
 				return
 			default:
+				recordRuntimeError("inbound TCP share listener failed: " + err.Error())
+				return
 			}
-			return
 		}
 		if !f.track(remote) {
 			_ = remote.Close()
@@ -155,6 +162,7 @@ func (f *tcpForwarder) forwardConnection(remote net.Conn, localAddress string) {
 
 	local, err := net.DialTimeout("tcp", localAddress, 10*time.Second)
 	if err != nil {
+		recordRuntimeError("inbound TCP target dial failed: " + err.Error())
 		return
 	}
 	if !f.track(local) {
@@ -209,10 +217,10 @@ func Initialize(privateAppDirectory string) error {
 	}
 	privateAppDirectory = filepath.Clean(privateAppDirectory)
 	if root != nil && root.Metadata() != nil {
-		if root.Metadata().RootPath != privateAppDirectory && (len(forwarders) > 0 || ActiveBackendCount() > 0) {
+		if root.Metadata().RootPath != privateAppDirectory && (len(forwarders) > 0 || ActiveBackendCount() > 0 || activeOperations > 0) {
 			return errors.New("cannot switch zrok storage roots while TCP forwarders are active")
 		}
-		if root.Metadata().RootPath == privateAppDirectory && (len(forwarders) > 0 || ActiveBackendCount() > 0) {
+		if root.Metadata().RootPath == privateAppDirectory && (len(forwarders) > 0 || ActiveBackendCount() > 0 || activeOperations > 0) {
 			return nil
 		}
 	}
@@ -344,7 +352,7 @@ func DisableEnvironment() error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if err := validateDisablePreconditions(root != nil && root.IsEnabled(), len(forwarders)+int(ActiveBackendCount())); err != nil {
+	if err := validateDisablePreconditions(root != nil && root.IsEnabled(), len(forwarders)+int(ActiveBackendCount())+int(activeOperations)); err != nil {
 		return err
 	}
 
@@ -403,7 +411,10 @@ func Status() string {
 		"identitySaved":    false,
 		"activeForwarders": len(forwarders),
 		"activeBackends": ActiveBackendCount(),
+		"activeShareBackends": ActiveShareBackendCount(),
 		"activeAccessForwarders": ActiveAccessForwarderCount(),
+		"activeOperations": activeOperations,
+		"lastRuntimeError": lastRuntimeError,
 		"managedShares":    len(managedShares),
 	}
 	if root != nil {
@@ -532,43 +543,27 @@ func StartTCPForwarder(shareToken, localAddress string) error {
 // GET through the zrok data plane. It returns only the HTTP status and response
 // body; share/access tokens are never returned or logged.
 func TestPrivateShare(shareToken string) (string, error) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	if root == nil || !root.IsEnabled() {
-		return "", errors.New("zrok environment is not enabled")
-	}
 	shareToken = strings.TrimSpace(shareToken)
-	if shareToken == "" {
-		return "", errors.New("share token is required")
-	}
-
-	access, err := sdk.CreateAccess(root, &sdk.AccessRequest{ShareToken: shareToken})
-	if err != nil {
-		return "", fmt.Errorf("create private-share access grant: %w", err)
-	}
-	defer func() { _ = sdk.DeleteAccess(root, access) }()
-
-	conn, err := sdk.NewDialer(shareToken, root)
-	if err != nil {
-		return "", fmt.Errorf("create private-share dialer: %w", err)
-	}
+	if shareToken == "" { return "", errors.New("share token is required") }
+	mu.Lock()
+	if root == nil || !root.IsEnabled() { mu.Unlock(); return "", errors.New("zrok environment is not enabled") }
+	testRoot := root
+	activeOperations++
+	mu.Unlock()
+	defer func() { mu.Lock(); activeOperations--; mu.Unlock() }()
+	access, err := sdk.CreateAccess(testRoot, &sdk.AccessRequest{ShareToken: shareToken})
+	if err != nil { return "", fmt.Errorf("create private-share access grant: %s", strings.ReplaceAll(err.Error(), shareToken, "[redacted]")) }
+	defer func() { _ = sdk.DeleteAccess(testRoot, access) }()
+	conn, err := sdk.NewDialer(shareToken, testRoot)
+	if err != nil { return "", fmt.Errorf("create private-share dialer: %s", strings.ReplaceAll(err.Error(), shareToken, "[redacted]")) }
 	defer conn.Close()
-	if err := conn.SetDeadline(time.Now().Add(25 * time.Second)); err != nil {
-		return "", fmt.Errorf("set private-share test deadline: %w", err)
-	}
-	if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
-		return "", fmt.Errorf("send HTTP request through private share: %w", err)
-	}
+	if err := conn.SetDeadline(time.Now().Add(45 * time.Second)); err != nil { return "", fmt.Errorf("set private-share test deadline: %w", err) }
+	if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil { return "", fmt.Errorf("send HTTP request through private share: %w", err) }
 	response, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodGet})
-	if err != nil {
-		return "", fmt.Errorf("read HTTP response through private share: %w", err)
-	}
+	if err != nil { return "", fmt.Errorf("read HTTP response through private share: %w", err) }
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 4096))
-	if err != nil {
-		return "", fmt.Errorf("read private-share response body: %w", err)
-	}
+	if err != nil { return "", fmt.Errorf("read private-share response body: %w", err) }
 	return fmt.Sprintf("HTTP %s\n\n%s", response.Status, strings.TrimSpace(string(body))), nil
 }
 
