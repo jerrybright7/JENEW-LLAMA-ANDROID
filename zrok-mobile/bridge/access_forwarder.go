@@ -130,7 +130,13 @@ func StartTCPAccessForwarder(shareToken, bindAddress string) error {
 		for {
 			local, acceptErr := listener.Accept()
 			if acceptErr != nil {
-				select { case <-f.stop: return; default: return }
+				select {
+				case <-f.stop:
+					return
+				default:
+					recordRuntimeError("private access listener failed: " + acceptErr.Error())
+					return
+				}
 			}
 			if !f.track(local) { _ = local.Close(); return }
 			go func(local net.Conn) {
