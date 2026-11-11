@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - jenew-jni-bridge
+      - six-thread-inference-audit
 
 permissions:
   contents: write
