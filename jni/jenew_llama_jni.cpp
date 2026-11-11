@@ -15,6 +15,14 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace {
+constexpr jint JENEW_INFERENCE_THREADS = 6;
+
+void enforceInferenceThreads(jint requested) {
+    if (requested != JENEW_INFERENCE_THREADS) {
+        LOGE("Kotlin requested %d threads; enforcing JENEW requirement of %d threads.",
+                requested, JENEW_INFERENCE_THREADS);
+    }
+}
 struct ModelHandle {
     llama_model * model = nullptr;
     std::mutex mutex;
@@ -68,8 +76,13 @@ Java_com_jenew_smartdc_JenewLlamaNative_nativeCreate(
     if (path == nullptr) return 0;
 
     llama_backend_init();
+    enforceInferenceThreads(threads);
     llama_model_params modelParams = llama_model_default_params();
     modelParams.n_gpu_layers = 0;
+    // Keep the memory-conscious default strategy explicit: mmap when supported,
+    // with llama.cpp automatic lazy-loading policy. Never force mlock here.
+    modelParams.load_mode = LLAMA_LOAD_MODE_AUTO;
+    modelParams.lazy_mode = LLAMA_LAZY_MODE_AUTO;
     llama_model * model = llama_model_load_from_file(path, modelParams);
     env->ReleaseStringUTFChars(modelPath, path);
 
@@ -81,7 +94,6 @@ Java_com_jenew_smartdc_JenewLlamaNative_nativeCreate(
     auto * handle = new ModelHandle();
     handle->model = model;
     (void) contextSize;
-    (void) threads;
     return reinterpret_cast<jlong>(handle);
 }
 
@@ -126,8 +138,9 @@ Java_com_jenew_smartdc_JenewLlamaNative_nativeGenerate(
                 static_cast<uint32_t>(promptTokens.size()));
         ctxParams.n_batch = std::min(ctxParams.n_batch, requestedContext);
         ctxParams.n_ubatch = std::min<uint32_t>(512, ctxParams.n_batch);
-        ctxParams.n_threads = std::max<jint>(1, threads);
-        ctxParams.n_threads_batch = std::max<jint>(1, threads);
+        enforceInferenceThreads(threads);
+        ctxParams.n_threads = JENEW_INFERENCE_THREADS;
+        ctxParams.n_threads_batch = JENEW_INFERENCE_THREADS;
 
         llama_context * ctx = llama_init_from_model(handle->model, ctxParams);
         if (ctx == nullptr) {
