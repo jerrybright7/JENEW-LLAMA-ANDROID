@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <climits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -112,6 +113,42 @@ Java_com_jenew_smartdc_JenewLlamaNative_nativeCreate(
             "Loaded model; context=%u, model_limit=%u, threads=%d",
             handle->contextSize, handle->modelContextLimit, handle->threads);
     return reinterpret_cast<jlong>(handle);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_jenew_smartdc_JenewLlamaNative_nativeTokenCount(
+        JNIEnv * env, jobject, jlong nativeHandle, jstring prompt) {
+    auto * handle = reinterpret_cast<ModelHandle *>(nativeHandle);
+    if (handle == nullptr || handle->model == nullptr || prompt == nullptr) {
+        throwJava(env, "Local model is not loaded or prompt is empty.");
+        return -1;
+    }
+
+    const char * chars = env->GetStringUTFChars(prompt, nullptr);
+    if (chars == nullptr) return -1;
+
+    std::string text(chars);
+    env->ReleaseStringUTFChars(prompt, chars);
+
+    std::lock_guard<std::mutex> lock(handle->mutex);
+
+    try {
+        const llama_vocab * vocab = llama_model_get_vocab(handle->model);
+        const auto tokens = tokenize(vocab, text);
+
+        if (tokens.size() > static_cast<size_t>(INT32_MAX)) {
+            throw std::runtime_error("Prompt token count exceeds JNI integer limit.");
+        }
+
+        return static_cast<jint>(tokens.size());
+    } catch (const std::exception & error) {
+        LOGE("Token counting error: %s", error.what());
+        throwJava(env, error.what());
+        return -1;
+    } catch (...) {
+        throwJava(env, "Unknown native tokenization error.");
+        return -1;
+    }
 }
 
 extern "C" JNIEXPORT jstring JNICALL
