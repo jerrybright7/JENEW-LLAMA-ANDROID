@@ -15,8 +15,15 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace {
+constexpr uint32_t JENEW_MIN_CONTEXT = 8192;
+constexpr uint32_t JENEW_MIN_BATCH = 512;
+constexpr uint32_t JENEW_MAX_BATCH = 1024;
+
 struct ModelHandle {
     llama_model * model = nullptr;
+    uint32_t contextSize = JENEW_MIN_CONTEXT;
+    uint32_t modelContextLimit = 0;
+    int32_t threads = 6;
     std::mutex mutex;
     std::atomic<bool> cancelled{false};
 };
@@ -78,10 +85,32 @@ Java_com_jenew_smartdc_JenewLlamaNative_nativeCreate(
         return 0;
     }
 
+    const int32_t modelContext = llama_model_n_ctx_train(model);
+    if (modelContext <= 0) {
+        llama_model_free(model);
+        throwJava(env, "The GGUF model does not report a valid training context size.");
+        return 0;
+    }
+
+    const uint32_t requestedContext = static_cast<uint32_t>(
+            std::max<jint>(static_cast<jint>(JENEW_MIN_CONTEXT), contextSize));
+    const uint32_t modelContextLimit = static_cast<uint32_t>(modelContext);
+    if (requestedContext > modelContextLimit) {
+        llama_model_free(model);
+        const std::string message = "JENEW requires an 8192-token context, but this model supports only "
+                + std::to_string(modelContextLimit) + " tokens.";
+        throwJava(env, message.c_str());
+        return 0;
+    }
+
     auto * handle = new ModelHandle();
     handle->model = model;
-    (void) contextSize;
-    (void) threads;
+    handle->contextSize = requestedContext;
+    handle->modelContextLimit = modelContextLimit;
+    handle->threads = std::max<jint>(1, threads);
+    __android_log_print(ANDROID_LOG_INFO, LOG_TAG,
+            "Loaded model; context=%u, model_limit=%u, threads=%d",
+            handle->contextSize, handle->modelContextLimit, handle->threads);
     return reinterpret_cast<jlong>(handle);
 }
 
@@ -111,36 +140,53 @@ Java_com_jenew_smartdc_JenewLlamaNative_nativeGenerate(
             return nullptr;
         }
 
-        const uint32_t requestedContext = static_cast<uint32_t>(
-                std::max<jint>(128, contextSize));
+        const uint32_t requestedContext = std::max(
+                handle->contextSize,
+                static_cast<uint32_t>(std::max<jint>(128, contextSize)));
+        if (requestedContext > handle->modelContextLimit) {
+            throwJava(env, "Requested context exceeds this GGUF model's supported context size.");
+            return nullptr;
+        }
+
         const uint32_t outputLimit = static_cast<uint32_t>(
                 std::max<jint>(1, maxTokens));
         if (promptTokens.size() + outputLimit > requestedContext) {
-            throwJava(env, "Prompt plus requested output exceeds the configured context size.");
+            const std::string message = "Prompt uses " + std::to_string(promptTokens.size())
+                    + " tokens and output reserves " + std::to_string(outputLimit)
+                    + "; the configured context is " + std::to_string(requestedContext)
+                    + ". Reduce the prompt or output limit.";
+            throwJava(env, message.c_str());
             return nullptr;
         }
 
         llama_context_params ctxParams = llama_context_default_params();
         ctxParams.n_ctx = requestedContext;
-        ctxParams.n_batch = std::max<uint32_t>(512,
-                static_cast<uint32_t>(promptTokens.size()));
-        ctxParams.n_batch = std::min(ctxParams.n_batch, requestedContext);
+        // Keep the decode batch bounded: large prompts are evaluated in chunks below.
+        ctxParams.n_batch = std::min<uint32_t>(requestedContext,
+                std::max<uint32_t>(JENEW_MIN_BATCH,
+                        std::min<uint32_t>(JENEW_MAX_BATCH,
+                                static_cast<uint32_t>(promptTokens.size()))));
         ctxParams.n_ubatch = std::min<uint32_t>(512, ctxParams.n_batch);
-        ctxParams.n_threads = std::max<jint>(1, threads);
-        ctxParams.n_threads_batch = std::max<jint>(1, threads);
+        ctxParams.n_threads = std::max<jint>(1, threads > 0 ? threads : handle->threads);
+        ctxParams.n_threads_batch = ctxParams.n_threads;
 
         llama_context * ctx = llama_init_from_model(handle->model, ctxParams);
         if (ctx == nullptr) {
-            throwJava(env, "Could not create llama.cpp inference context.");
+            throwJava(env, "Could not create llama.cpp inference context for the requested context size.");
             return nullptr;
         }
 
         std::unique_ptr<llama_context, decltype(&llama_free)> context(ctx, &llama_free);
-        llama_batch batch = llama_batch_get_one(promptTokens.data(),
-                static_cast<int32_t>(promptTokens.size()));
-        if (llama_decode(ctx, batch) != 0) {
-            throwJava(env, "llama.cpp failed to evaluate the prompt.");
-            return nullptr;
+        const size_t promptBatchSize = static_cast<size_t>(ctxParams.n_batch);
+        for (size_t offset = 0; offset < promptTokens.size(); offset += promptBatchSize) {
+            const size_t remaining = promptTokens.size() - offset;
+            const int32_t chunkSize = static_cast<int32_t>(
+                    std::min(promptBatchSize, remaining));
+            llama_batch batch = llama_batch_get_one(promptTokens.data() + offset, chunkSize);
+            if (llama_decode(ctx, batch) != 0) {
+                throwJava(env, "llama.cpp failed to evaluate a prompt chunk.");
+                return nullptr;
+            }
         }
 
         llama_sampler_chain_params samplerParams = llama_sampler_chain_default_params();
