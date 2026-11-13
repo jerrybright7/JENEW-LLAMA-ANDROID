@@ -31,6 +31,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build zip glslc spirv-headers
+          SPIRV_CONFIG="$(find /usr -name SPIRV-HeadersConfig.cmake -o -name spirv-headers-config.cmake | head -n 1)"
+          test -n "$SPIRV_CONFIG"
+          echo "SPIRV_HEADERS_DIR=$(dirname "$SPIRV_CONFIG")" >> "$GITHUB_ENV"
       - name: Build llama.cpp ARM64 with Vulkan
         run: |
           cmake -S llama.cpp -B llama.cpp/build-android-vulkan \
@@ -44,6 +47,7 @@ jobs:
             -DGGML_NATIVE=OFF \
             -DGGML_OPENMP=OFF \
             -DGGML_VULKAN=ON \
+            -DSPIRV-Headers_DIR="$SPIRV_HEADERS_DIR" \
             -DLLAMA_BUILD_COMMON=OFF \
             -DLLAMA_BUILD_TESTS=OFF \
             -DLLAMA_BUILD_EXAMPLES=OFF \
