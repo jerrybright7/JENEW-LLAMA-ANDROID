@@ -62,7 +62,46 @@ std::string tokenPiece(const llama_vocab * vocab, llama_token token) {
                 static_cast<int32_t>(buffer.size()), 0, false);
     }
     if (count <= 0) return {};
+
     return std::string(buffer.data(), static_cast<size_t>(count));
+}
+
+ModelHandle * createModelHandle(JNIEnv * env, jstring modelPath, jint contextSize, jint threads, jint gpuLayers) {
+    if (modelPath == nullptr) { throwJava(env, "Model path is null."); return nullptr; }
+    const char * path = env->GetStringUTFChars(modelPath, nullptr);
+    if (path == nullptr) return nullptr;
+    llama_model_params modelParams = llama_model_default_params();
+    modelParams.n_gpu_layers = std::max<jint>(0, gpuLayers);
+    llama_model * model = llama_model_load_from_file(path, modelParams);
+    env->ReleaseStringUTFChars(modelPath, path);
+    if (model == nullptr) { throwJava(env, "llama.cpp could not load the GGUF model."); return nullptr; }
+    const int32_t modelContext = llama_model_n_ctx_train(model);
+    if (modelContext <= 0) {
+        llama_model_free(model);
+        throwJava(env, "The GGUF model does not report a valid training context size.");
+        return nullptr;
+    }
+    const uint32_t requestedContext = static_cast<uint32_t>(
+            std::max<jint>(static_cast<jint>(JENEW_MIN_CONTEXT), contextSize));
+    const uint32_t modelContextLimit = static_cast<uint32_t>(modelContext);
+    if (requestedContext > modelContextLimit) {
+        llama_model_free(model);
+        const std::string message = "JENEW requires an 8192-token context, but this model supports only "
+                + std::to_string(modelContextLimit) + " tokens.";
+        throwJava(env, message.c_str());
+        return nullptr;
+    }
+    auto * handle = new ModelHandle();
+    handle->model = model;
+    handle->contextSize = requestedContext;
+    handle->modelContextLimit = modelContextLimit;
+    handle->threads = std::max<jint>(1, threads);
+    handle->modelLayers = llama_model_n_layer(model);
+    __android_log_print(ANDROID_LOG_INFO, LOG_TAG,
+            "Loaded model; context=%u, model_limit=%u, layers=%d, gpu_layers=%d, threads=%d",
+            handle->contextSize, handle->modelContextLimit, handle->modelLayers,
+            std::max<jint>(0, gpuLayers), handle->threads);
+    return handle;
 }
 }
 
@@ -73,6 +112,48 @@ Java_com_jenew_smartdc_JenewLlamaNative_nativeCreate(
     return reinterpret_cast<jlong>(createModelHandle(env, modelPath, contextSize, threads, 0));
 }
 
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_jenew_smartdc_JenewLlamaNative_nativeCreateGpu(
+        JNIEnv * env, jobject, jstring modelPath, jint contextSize, jint threads, jint gpuLayers) {
+    llama_backend_init();
+    ggml_backend_load_all();
+    if (gpuLayers > 0) {
+        ggml_backend_reg_t vulkan = ggml_backend_reg_by_name("Vulkan");
+        if (vulkan == nullptr || ggml_backend_reg_dev_count(vulkan) == 0) {
+            throwJava(env, "Vulkan backend is not available on this device. Turn GPU off to use CPU mode.");
+            return 0;
+        }
+    }
+    return reinterpret_cast<jlong>(createModelHandle(env, modelPath, contextSize, threads, gpuLayers));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_jenew_smartdc_JenewLlamaNative_nativeVulkanDeviceName(JNIEnv * env, jobject) {
+    llama_backend_init();
+    ggml_backend_load_all();
+    ggml_backend_reg_t vulkan = ggml_backend_reg_by_name("Vulkan");
+    if (vulkan == nullptr) return nullptr;
+    for (size_t i = 0; i < ggml_backend_reg_dev_count(vulkan); ++i) {
+        ggml_backend_dev_t device = ggml_backend_reg_dev_get(vulkan, i);
+        if (device == nullptr) continue;
+        const auto type = ggml_backend_dev_type(device);
+        if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            const char * name = ggml_backend_dev_name(device);
+            return env->NewStringUTF(name == nullptr ? "Vulkan GPU" : name);
+        }
+    }
+    return nullptr;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_jenew_smartdc_JenewLlamaNative_nativeModelLayerCount(JNIEnv * env, jobject, jlong nativeHandle) {
+    auto * handle = reinterpret_cast<ModelHandle *>(nativeHandle);
+    if (handle == nullptr || handle->model == nullptr) {
+        throwJava(env, "Local model is not loaded.");
+        return 0;
+    }
+    return static_cast<jint>(handle->modelLayers);
+}
 extern "C" JNIEXPORT jint JNICALL
 Java_com_jenew_smartdc_JenewLlamaNative_nativeTokenCount(
         JNIEnv * env, jobject, jlong nativeHandle, jstring prompt) {
