@@ -30,7 +30,7 @@ jobs:
       - name: Install Vulkan shader build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build zip glslc spirv-headers
+          sudo apt-get install -y cmake ninja-build zip glslc spirv-headers libvulkan-dev
           SPIRV_CONFIG="$(find /usr -name SPIRV-HeadersConfig.cmake -o -name spirv-headers-config.cmake | head -n 1)"
           test -n "$SPIRV_CONFIG"
           echo "SPIRV_HEADERS_DIR=$(dirname "$SPIRV_CONFIG")" >> "$GITHUB_ENV"
