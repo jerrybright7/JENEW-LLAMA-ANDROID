@@ -1,0 +1,159 @@
+name: JENEW llama.cpp ARM64 Vulkan Experimental Build
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - vulkan-gpu-offload
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout JENEW native bridge
+        uses: actions/checkout@v4
+        with:
+          ref: vulkan-gpu-offload
+          path: jenew-native
+      - name: Checkout pinned llama.cpp source
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: 7d7f0287530bc8981690f361d8c1627dbae1c99a
+          path: llama.cpp
+      - name: Checkout matching Vulkan C++ headers
+        uses: actions/checkout@v4
+        with:
+          repository: KhronosGroup/Vulkan-Headers
+          ref: v1.4.328
+          path: Vulkan-Headers
+      - name: Install Android NDK
+        run: |
+          SDK="$ANDROID_SDK_ROOT"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865"
+          echo "ANDROID_NDK=$SDK/ndk/29.0.14206865" >> "$GITHUB_ENV"
+      - name: Install Vulkan shader build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build zip glslc spirv-headers
+          SPIRV_CONFIG="$(find /usr -name SPIRV-HeadersConfig.cmake -o -name spirv-headers-config.cmake | head -n 1)"
+          test -n "$SPIRV_CONFIG"
+          echo "SPIRV_HEADERS_DIR=$(dirname "$SPIRV_CONFIG")" >> "$GITHUB_ENV"
+      - name: Prepare Android shared-library SONAMEs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          prefixes = (
+              "VERSION $" + "{GGML_VERSION",
+              "SOVERSION $" + "{GGML_VERSION",
+              "VERSION $" + "{LLAMA_VERSION",
+              "SOVERSION $" + "{LLAMA_VERSION",
+          )
+          targets = (
+              Path("llama.cpp/ggml/src/CMakeLists.txt"),
+              Path("llama.cpp/src/CMakeLists.txt"),
+          )
+          for path in targets:
+              lines = path.read_text().splitlines()
+              filtered = [line for line in lines if not line.strip().startswith(prefixes)]
+              path.write_text("\n".join(filtered) + "\n")
+          print("Configured unversioned .so SONAMEs for Android packaging.")
+          PY
+      - name: Build llama.cpp ARM64 with Vulkan
+        run: |
+          VULKAN_LIBRARY="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/24/libvulkan.so"
+          test -f "$VULKAN_LIBRARY"
+          test -f "$GITHUB_WORKSPACE/Vulkan-Headers/include/vulkan/vulkan.hpp"
+          cmake -S llama.cpp -B llama.cpp/build-android-vulkan \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-28 \
+            -DANDROID_STL=c++_shared \
+            -DBUILD_SHARED_LIBS=ON \
+            -DGGML_NATIVE=OFF \
+            -DGGML_OPENMP=OFF \
+            -DGGML_VULKAN=ON \
+            -DGGML_BACKEND_DL=OFF \
+            -DVulkan_INCLUDE_DIR="$GITHUB_WORKSPACE/Vulkan-Headers/include" \
+            -DVulkan_LIBRARY="$VULKAN_LIBRARY" \
+            -DSPIRV-Headers_DIR="$SPIRV_HEADERS_DIR" \
+            -DLLAMA_BUILD_COMMON=OFF \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_TOOLS=OFF \
+            -DLLAMA_BUILD_SERVER=OFF \
+            -DLLAMA_BUILD_APP=OFF \
+            -DLLAMA_BUILD_UI=OFF
+          cmake --build llama.cpp/build-android-vulkan --config Release --parallel 2
+          LLVM_READELF="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          for lib in libggml-base.so libggml-cpu.so libggml.so libggml-vulkan.so libllama.so; do
+            test -f "llama.cpp/build-android-vulkan/bin/$lib" || {
+              echo "Missing expected Vulkan runtime library: $lib"
+              find llama.cpp/build-android-vulkan -name "libggml-vulkan.so" -o -name "libllama.so"
+              exit 1
+            }
+            SONAME="$("$LLVM_READELF" -d "llama.cpp/build-android-vulkan/bin/$lib" | awk -F'[][]' '/SONAME/ {print $2; exit}')"
+            if [ "$SONAME" != "$lib" ]; then
+              echo "Unexpected SONAME for $lib: $SONAME"
+              exit 1
+            fi
+          done
+      - name: Build JENEW Vulkan JNI bridge
+        run: |
+          cmake -S jenew-native/jni -B jenew-native/build-jni-vulkan \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-28 \
+            -DANDROID_STL=c++_shared \
+            -DLLAMA_CPP_ROOT="$GITHUB_WORKSPACE/llama.cpp" \
+            -DLLAMA_LIB_DIR="$GITHUB_WORKSPACE/llama.cpp/build-android-vulkan/bin"
+          cmake --build jenew-native/build-jni-vulkan --config Release --parallel 2
+          test -f jenew-native/build-jni-vulkan/libjenewllama.so
+      - name: Assemble separate experimental Vulkan package
+        run: |
+          mkdir -p package/arm64-v8a
+          for lib in libggml-base.so libggml-cpu.so libggml.so libggml-vulkan.so libllama.so; do
+            cp "llama.cpp/build-android-vulkan/bin/$lib" package/arm64-v8a/
+          done
+          cp jenew-native/build-jni-vulkan/libjenewllama.so package/arm64-v8a/
+          CXX_RUNTIME="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+          test -f "$CXX_RUNTIME"
+          cp "$CXX_RUNTIME" package/arm64-v8a/
+          cp llama.cpp/LICENSE package/LICENSE
+          cat > package/README.txt <<'EOF'
+          JENEW llama.cpp Android ARM64 Vulkan experimental runtime
+          ABI: arm64-v8a | Minimum Android API: 28
+          llama.cpp source commit: 7d7f0287530bc8981690f361d8c1627dbae1c99a
+          Experimental Vulkan build; retain the existing CPU-only runtime for fallback and rollback.
+          Includes ggml Vulkan backend, CPU backend, JENEW JNI bridge and libc++_shared.
+          All bundled shared libraries use Android-compatible unversioned SONAMEs.
+          Place all .so files together under app/src/main/jniLibs/arm64-v8a/.
+          EOF
+          cd package
+          zip -9 -r ../JENEW-LLAMA-ARM64-VULKAN-EXPERIMENTAL.zip .
+      - name: Upload experimental runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JENEW-LLAMA-ARM64-VULKAN-EXPERIMENTAL
+          path: |
+            package/
+            JENEW-LLAMA-ARM64-VULKAN-EXPERIMENTAL.zip
+          if-no-files-found: error
+      - name: Publish separate experimental package
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: llama-android-arm64-vulkan-experimental
+          name: JENEW llama.cpp Android ARM64 Vulkan Experimental
+          body: |
+            Experimental Vulkan-enabled Android ARM64 runtime.
+            Separate from the stable CPU-only runtime. Validate device support and performance on-device.
+            Minimum Android API: 28.
+          files: JENEW-LLAMA-ARM64-VULKAN-EXPERIMENTAL.zip
+          overwrite_files: true
+          make_latest: false
