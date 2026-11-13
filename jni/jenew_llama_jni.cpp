@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <llama.h>
+#include <ggml-backend.h>
 
 #include <algorithm>
 #include <atomic>
@@ -25,6 +26,7 @@ struct ModelHandle {
     uint32_t contextSize = JENEW_MIN_CONTEXT;
     uint32_t modelContextLimit = 0;
     int32_t threads = 6;
+    int32_t modelLayers = 0;
     std::mutex mutex;
     std::atomic<bool> cancelled{false};
 };
@@ -67,52 +69,8 @@ std::string tokenPiece(const llama_vocab * vocab, llama_token token) {
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_jenew_smartdc_JenewLlamaNative_nativeCreate(
         JNIEnv * env, jobject, jstring modelPath, jint contextSize, jint threads) {
-    if (modelPath == nullptr) {
-        throwJava(env, "Model path is null.");
-        return 0;
-    }
-
-    const char * path = env->GetStringUTFChars(modelPath, nullptr);
-    if (path == nullptr) return 0;
-
     llama_backend_init();
-    llama_model_params modelParams = llama_model_default_params();
-    modelParams.n_gpu_layers = 0;
-    llama_model * model = llama_model_load_from_file(path, modelParams);
-    env->ReleaseStringUTFChars(modelPath, path);
-
-    if (model == nullptr) {
-        throwJava(env, "llama.cpp could not load the GGUF model.");
-        return 0;
-    }
-
-    const int32_t modelContext = llama_model_n_ctx_train(model);
-    if (modelContext <= 0) {
-        llama_model_free(model);
-        throwJava(env, "The GGUF model does not report a valid training context size.");
-        return 0;
-    }
-
-    const uint32_t requestedContext = static_cast<uint32_t>(
-            std::max<jint>(static_cast<jint>(JENEW_MIN_CONTEXT), contextSize));
-    const uint32_t modelContextLimit = static_cast<uint32_t>(modelContext);
-    if (requestedContext > modelContextLimit) {
-        llama_model_free(model);
-        const std::string message = "JENEW requires an 8192-token context, but this model supports only "
-                + std::to_string(modelContextLimit) + " tokens.";
-        throwJava(env, message.c_str());
-        return 0;
-    }
-
-    auto * handle = new ModelHandle();
-    handle->model = model;
-    handle->contextSize = requestedContext;
-    handle->modelContextLimit = modelContextLimit;
-    handle->threads = std::max<jint>(1, threads);
-    __android_log_print(ANDROID_LOG_INFO, LOG_TAG,
-            "Loaded model; context=%u, model_limit=%u, threads=%d",
-            handle->contextSize, handle->modelContextLimit, handle->threads);
-    return reinterpret_cast<jlong>(handle);
+    return reinterpret_cast<jlong>(createModelHandle(env, modelPath, contextSize, threads, 0));
 }
 
 extern "C" JNIEXPORT jint JNICALL
