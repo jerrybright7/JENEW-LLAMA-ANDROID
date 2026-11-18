@@ -44,6 +44,18 @@ func StartShareBackend(shareToken, backendMode, target string) error {
 		return errors.New("share token is required")
 	}
 
+	// Host is a restart operation, not a second engine allocation. Stop the
+	// current engine first so the same share token and local target port are
+	// reused on every Host tap.
+	backendMu.Lock()
+	alreadyRunning := backends[shareToken] != nil
+	backendMu.Unlock()
+	if alreadyRunning {
+		if err := StopShareBackend(shareToken); err != nil {
+			return fmt.Errorf("restart existing share backend: %w", err)
+		}
+	}
+
 	mu.Lock()
 	if root == nil || !root.IsEnabled() {
 		mu.Unlock()
