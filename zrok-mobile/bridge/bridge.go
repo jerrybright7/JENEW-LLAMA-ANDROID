@@ -452,6 +452,52 @@ func CreateShare(backendMode, shareMode, target string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	backendMode = strings.TrimSpace(backendMode)
+	shareMode = strings.TrimSpace(shareMode)
+	target = strings.TrimSpace(target)
+
+	// A matching managed TCP share is the persistent host slot. Reusing it
+	// makes the existing Android CREATE & START action idempotent across taps
+	// and process restarts instead of provisioning another controller share.
+	var reusable *managedShare
+	for token, candidate := range managedShares {
+		if candidate.BackendMode != backendMode || candidate.ShareMode != shareMode || candidate.Target != target {
+			continue
+		}
+		if reusable == nil || (candidate.Running && !reusable.Running) ||
+			(candidate.Running == reusable.Running && candidate.CreatedAt < reusable.CreatedAt) {
+				copy := candidate
+				reusable = &copy
+			}
+		_ = token
+	}
+	if reusable != nil {
+		// Retire stale duplicate records for this exact managed host when they
+		// are idle. Never delete a share while one of its engines is running.
+		for token, candidate := range managedShares {
+			if token == reusable.ShareToken || candidate.BackendMode != backendMode ||
+				candidate.ShareMode != shareMode || candidate.Target != target || backendIsRunning(token) {
+				continue
+			}
+			if err := sdk.DeleteShare(root, &sdk.Share{Token: token}); err != nil {
+				return "", fmt.Errorf("reuse existing host %q; could not retire duplicate managed share: %w", reusable.ShareToken, err)
+			}
+			delete(managedShares, token)
+		}
+		if err := persistManagedSharesLocked(); err != nil {
+			return "", err
+		}
+		encoded, err := json.Marshal(map[string]interface{}{
+			"token": reusable.ShareToken,
+			"shareToken": reusable.ShareToken,
+			"frontendEndpoints": reusable.FrontendEndpoints,
+		})
+		if err != nil {
+			return "", fmt.Errorf("encode reused zrok share: %w", err)
+		}
+		return string(encoded), nil
+	}
+
 	created, err := sdk.CreateShare(root, request)
 	if err != nil {
 		return "", fmt.Errorf("create zrok share: %w", err)
@@ -462,8 +508,8 @@ func CreateShare(backendMode, shareMode, target string) (string, error) {
 		return "", fmt.Errorf("encode created share: %w", err)
 	}
 	managedShares[created.Token] = managedShare{
-		ShareToken: created.Token, BackendMode: strings.TrimSpace(backendMode),
-		ShareMode: strings.TrimSpace(shareMode), Target: strings.TrimSpace(target),
+		ShareToken: created.Token, BackendMode: backendMode,
+		ShareMode: shareMode, Target: target,
 		FrontendEndpoints: created.FrontendEndpoints,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
