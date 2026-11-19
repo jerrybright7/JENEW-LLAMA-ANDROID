@@ -35,9 +35,10 @@ jobs:
           set -euo pipefail
           HOST_BIN="$(find dist/host -type f -name esp32sim -perm -u+x -print -quit)"
           "$HOST_BIN" --version
-          "$HOST_BIN" --help > dist/host/cli-help.txt
+          # This CLI prints help to stderr and returns a non-zero status for --help.
+          "$HOST_BIN" --help > dist/host/cli-help.txt 2>&1 || true
           grep -q -- '--chip' dist/host/cli-help.txt
-          grep -q 'esp32' dist/host/cli-help.txt
+          grep -q -- '--chip esp32' dist/host/cli-help.txt
 
       - name: Fetch verified Espressif classic ESP32 mask ROM
         shell: bash
