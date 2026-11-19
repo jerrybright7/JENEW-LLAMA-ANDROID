@@ -56,9 +56,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp SHA256SUMS.txt dist/
-          cp -a roms dist/
-          cat > dist/README-JENEW.txt <<'EOF'
+          mkdir -p package
+          cp -a dist/arm64/. package/
+          cp -a roms package/roms
+          cp SHA256SUMS.txt package/
+          cat > package/README-JENEW.txt <<'EOF'
           JENEW ESP32Sim ARM64 package
           Upstream: https://github.com/mikroverk/esp32sim
           Version: 0.4.0
@@ -68,10 +70,9 @@ jobs:
           This is the Linux ARM64 simulator package, not an Android APK.
           Classic ESP32 support is early; verify each peripheral used by firmware.
           EOF
-          cd dist/arm64
-          zip -qr ../../JENEW-ESP32SIM-USERLAND-ARM64.zip .
-          cd ../..
-          zip -qr JENEW-ESP32SIM-USERLAND-ARM64.zip dist/roms dist/README-JENEW.txt dist/SHA256SUMS.txt
+          chmod +x package/esp32sim
+          (cd package && zip -qr ../JENEW-ESP32SIM-USERLAND-ARM64.zip .)
+          sha256sum JENEW-ESP32SIM-USERLAND-ARM64.zip > JENEW-ESP32SIM-USERLAND-ARM64.zip.sha256
 
       - name: Upload verified packages
         uses: actions/upload-artifact@v4
@@ -79,9 +80,7 @@ jobs:
           name: JENEW-ESP32SIM-USERLAND-ARM64
           path: |
             JENEW-ESP32SIM-USERLAND-ARM64.zip
-            dist/arm64/
-            dist/roms/
-            dist/README-JENEW.txt
-            dist/SHA256SUMS.txt
+            JENEW-ESP32SIM-USERLAND-ARM64.zip.sha256
+            package/
           if-no-files-found: error
           retention-days: 30
