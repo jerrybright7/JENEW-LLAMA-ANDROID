@@ -1,0 +1,87 @@
+name: JENEW ESP32 Simulator ARM64 Package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Download official ESP32Sim 0.4.0 releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/arm64 dist/host roms
+          BASE="https://github.com/mikroverk/esp32sim/releases/download/v0.4.0"
+          curl -fL --retry 3 "$BASE/esp32sim-0.4.0-linux-arm64.tar.gz" -o arm64.tar.gz
+          curl -fL --retry 3 "$BASE/esp32sim-0.4.0-linux-x86_64.tar.gz" -o host.tar.gz
+          curl -fL --retry 3 "$BASE/esp32sim-0.4.0-SHA256SUMS.txt" -o SHA256SUMS.txt
+          grep 'esp32sim-0.4.0-linux-arm64.tar.gz' SHA256SUMS.txt > arm64.sum
+          grep 'esp32sim-0.4.0-linux-x86_64.tar.gz' SHA256SUMS.txt > host.sum
+          sha256sum -c arm64.sum
+          sha256sum -c host.sum
+          tar -xzf arm64.tar.gz -C dist/arm64
+          tar -xzf host.tar.gz -C dist/host
+          find dist/arm64 -type f -name esp32sim -print -quit | grep -q .
+          find dist/host -type f -name esp32sim -print -quit | grep -q .
+
+      - name: Run host emulator smoke checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST_BIN="$(find dist/host -type f -name esp32sim -perm -u+x -print -quit)"
+          "$HOST_BIN" --version
+          "$HOST_BIN" --help > dist/host/cli-help.txt
+          grep -q -- '--chip' dist/host/cli-help.txt
+          grep -q 'esp32' dist/host/cli-help.txt
+
+      - name: Fetch verified Espressif classic ESP32 mask ROM
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOL="$(find dist/arm64 -type f -name fetch-rom-elfs.sh -print -quit)"
+          if [ -z "$TOOL" ]; then
+            TOOL="$(find dist/host -type f -name fetch-rom-elfs.sh -print -quit)"
+          fi
+          test -n "$TOOL"
+          bash "$TOOL" "$PWD/roms"
+          test -f roms/esp32_rev300_rom.elf
+          sha256sum roms/esp32_rev300_rom.elf > roms/SHA256SUMS
+
+      - name: Assemble UserLAnd ARM64 package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp SHA256SUMS.txt dist/
+          cp -a roms dist/
+          cat > dist/README-JENEW.txt <<'EOF'
+          JENEW ESP32Sim ARM64 package
+          Upstream: https://github.com/mikroverk/esp32sim
+          Version: 0.4.0
+          Target: classic ESP32 / ESP32-WROOM-32 (Xtensa LX6)
+          Run: ./esp32sim --chip esp32 --help
+          ROM: roms/esp32_rev300_rom.elf
+          This is the Linux ARM64 simulator package, not an Android APK.
+          Classic ESP32 support is early; verify each peripheral used by firmware.
+          EOF
+          cd dist/arm64
+          zip -qr ../../JENEW-ESP32SIM-USERLAND-ARM64.zip .
+          cd ../..
+          zip -qr JENEW-ESP32SIM-USERLAND-ARM64.zip dist/roms dist/README-JENEW.txt dist/SHA256SUMS.txt
+
+      - name: Upload verified packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: JENEW-ESP32SIM-USERLAND-ARM64
+          path: |
+            JENEW-ESP32SIM-USERLAND-ARM64.zip
+            dist/arm64/
+            dist/roms/
+            dist/README-JENEW.txt
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
