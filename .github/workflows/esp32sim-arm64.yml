@@ -58,7 +58,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p package
+          ARM_BIN="$(find dist/arm64 -type f -name esp32sim -print -quit)"
+          test -n "$ARM_BIN"
+          # Upstream archive nests the executable in a versioned directory.
+          # Normalize the package entry point while retaining the upstream tree.
           cp -a dist/arm64/. package/
+          cp -a "$ARM_BIN" package/esp32sim
           cp -a roms package/roms
           cp SHA256SUMS.txt package/
           cat > package/README-JENEW.txt <<'EOF'
@@ -66,12 +71,14 @@ jobs:
           Upstream: https://github.com/mikroverk/esp32sim
           Version: 0.4.0
           Target: classic ESP32 / ESP32-WROOM-32 (Xtensa LX6)
-          Run: ./esp32sim --chip esp32 --help
+          Run: ./esp32sim --chip esp32 --boot rom --help
           ROM: roms/esp32_rev300_rom.elf
           This is the Linux ARM64 simulator package, not an Android APK.
           Classic ESP32 support is early; verify each peripheral used by firmware.
           EOF
           chmod +x package/esp32sim
+          test -x package/esp32sim
+          test -s package/roms/esp32_rev300_rom.elf
           (cd package && zip -qr ../JENEW-ESP32SIM-USERLAND-ARM64.zip .)
           sha256sum JENEW-ESP32SIM-USERLAND-ARM64.zip > JENEW-ESP32SIM-USERLAND-ARM64.zip.sha256
 
