@@ -17,15 +17,15 @@ jobs:
           set -euo pipefail
           mkdir -p dist/arm64 dist/host roms
           BASE="https://github.com/mikroverk/esp32sim/releases/download/v0.4.0"
-          curl -fL --retry 3 "$BASE/esp32sim-0.4.0-linux-arm64.tar.gz" -o arm64.tar.gz
-          curl -fL --retry 3 "$BASE/esp32sim-0.4.0-linux-x86_64.tar.gz" -o host.tar.gz
+          curl -fL --retry 3 "$BASE/esp32sim-0.4.0-linux-arm64.tar.gz" -o esp32sim-0.4.0-linux-arm64.tar.gz
+          curl -fL --retry 3 "$BASE/esp32sim-0.4.0-linux-x86_64.tar.gz" -o esp32sim-0.4.0-linux-x86_64.tar.gz
           curl -fL --retry 3 "$BASE/esp32sim-0.4.0-SHA256SUMS.txt" -o SHA256SUMS.txt
           grep 'esp32sim-0.4.0-linux-arm64.tar.gz' SHA256SUMS.txt > arm64.sum
           grep 'esp32sim-0.4.0-linux-x86_64.tar.gz' SHA256SUMS.txt > host.sum
           sha256sum -c arm64.sum
           sha256sum -c host.sum
-          tar -xzf arm64.tar.gz -C dist/arm64
-          tar -xzf host.tar.gz -C dist/host
+          tar -xzf esp32sim-0.4.0-linux-arm64.tar.gz -C dist/arm64
+          tar -xzf esp32sim-0.4.0-linux-x86_64.tar.gz -C dist/host
           find dist/arm64 -type f -name esp32sim -print -quit | grep -q .
           find dist/host -type f -name esp32sim -print -quit | grep -q .
 
